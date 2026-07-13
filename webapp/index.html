@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>設備台帳管理システム（デモ）</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Hiragino Sans", "Noto Sans CJK JP", Arial, sans-serif;
+    margin: 0; background: #FFFFFF; color: #222;
+  }
+  /* ---------- login screen ---------- */
+  #login-screen {
+    height: 100vh; display: flex; align-items: center; justify-content: center;
+  }
+  .login-box {
+    width: 340px; border: 1px solid #E4E6EA; border-radius: 10px; padding: 28px;
+  }
+  .login-box h1 { font-size: 17px; color: #1E2761; margin: 0 0 4px; }
+  .login-box p.sub { font-size: 12.5px; color: #666; margin: 0 0 20px; }
+  .login-box label { display: block; font-size: 12px; color: #666; margin: 12px 0 4px; }
+  .login-box input {
+    width: 100%; padding: 8px 10px; font-size: 13px; border: 1px solid #D5D8DD; border-radius: 6px;
+  }
+  .login-tabs { display: flex; gap: 6px; margin-bottom: 6px; }
+  .login-tabs button {
+    flex: 1; padding: 6px 0; border: 1px solid #D5D8DD; background: #FAFAFB; border-radius: 6px;
+    font-size: 12.5px; cursor: pointer; color: #555;
+  }
+  .login-tabs button.active { background: #1E2761; color: #fff; border-color: #1E2761; }
+  .login-box .btn { width: 100%; margin-top: 18px; }
+  #login-msg { min-height: 18px; font-size: 12px; margin-top: 10px; }
+  #login-msg.err { color: #B85042; }
+  #login-msg.ok { color: #1E7A3D; }
+
+  /* ---------- app shell ---------- */
+  #app-screen { display: none; height: 100vh; overflow: hidden; flex-direction: column; }
+  #topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 20px; border-bottom: 1px solid #E4E6EA; flex-shrink: 0;
+  }
+  #topbar .title { font-size: 14px; font-weight: 600; color: #1E2761; }
+  #topbar .user { font-size: 12.5px; color: #666; display: flex; align-items: center; gap: 10px; }
+  #body-wrap { flex: 1; display: flex; overflow: hidden; }
+  #sidebar {
+    width: 190px; flex-shrink: 0; background: #F7F8FA; border-right: 1px solid #E4E6EA;
+    padding: 12px 0; overflow-y: auto;
+  }
+  #sidebar .grp-label { font-size: 11px; color: #888; padding: 10px 14px 4px; text-transform: uppercase; letter-spacing: .03em; }
+  .tab-btn {
+    display: block; width: 100%; text-align: left; padding: 8px 14px; border: none; background: none;
+    font-size: 13px; color: #333; cursor: pointer; border-left: 3px solid transparent;
+  }
+  .tab-btn:hover { background: #EEF0F3; }
+  .tab-btn.active { background: #E8ECF5; border-left-color: #1E2761; color: #1E2761; font-weight: 600; }
+  #main { flex: 1; overflow-y: auto; padding: 24px 32px; }
+  h1.page-title { font-size: 18px; margin: 0 0 2px; color: #1E2761; }
+  .desc { font-size: 12.5px; color: #666; margin: 0 0 18px; }
+  .card { border: 1px solid #E4E6EA; border-radius: 8px; padding: 16px; margin-bottom: 20px; }
+  .card h2 { font-size: 13px; margin: 0 0 12px; color: #333; }
+  .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; align-items: end; }
+  .field label { display: block; font-size: 11px; color: #666; margin-bottom: 3px; }
+  .field input, .field select {
+    width: 100%; padding: 6px 8px; font-size: 13px; border: 1px solid #D5D8DD; border-radius: 5px; background: #fff;
+  }
+  .btn {
+    padding: 7px 14px; font-size: 13px; border-radius: 6px; border: none; cursor: pointer; background: #1E2761; color: #fff;
+  }
+  .btn:hover { background: #2c3a8a; }
+  .btn.danger { background: #B85042; padding: 4px 10px; font-size: 12px; }
+  .btn.danger:hover { background: #d0604f; }
+  .btn.ghost { background: none; border: 1px solid #D5D8DD; color: #444; }
+  table.data { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.data th, table.data td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #EEE; white-space: nowrap; }
+  table.data th { color: #666; font-weight: 600; background: #FAFAFB; position: sticky; top: 0; }
+  table.data tbody tr:hover { background: #FAFBFC; }
+  .badge { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; }
+  .badge.now { background: #E4F3EA; color: #1E7A3D; }
+  .msg { font-size: 12.5px; padding: 8px 10px; border-radius: 6px; margin-bottom: 12px; }
+  .msg.err { background: #FBEDE9; color: #B85042; }
+  .msg.ok { background: #E4F3EA; color: #1E7A3D; }
+  .table-scroll { max-height: 320px; overflow: auto; border: 1px solid #EEE; border-radius: 6px; }
+  .empty { color: #999; font-size: 12.5px; padding: 10px 0; }
+  .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+
+<!-- ============ ログイン画面 ============ -->
+<div id="login-screen">
+  <div class="login-box">
+    <h1>設備台帳管理システム（デモ）</h1>
+    <p class="sub">Supabaseアカウントでログインしてください</p>
+    <div class="login-tabs">
+      <button id="tab-login" class="active">ログイン</button>
+      <button id="tab-signup">新規登録</button>
+    </div>
+    <label>メールアドレス</label>
+    <input type="email" id="login-email" autocomplete="username">
+    <label>パスワード</label>
+    <input type="password" id="login-password" autocomplete="current-password">
+    <button class="btn" id="login-submit">ログイン</button>
+    <div id="login-msg"></div>
+  </div>
+</div>
+
+<!-- ============ アプリ本体 ============ -->
+<div id="app-screen">
+  <div id="topbar">
+    <div class="title">設備台帳管理システム（デモ）</div>
+    <div class="user"><span id="user-email"></span><button class="btn ghost" id="logout-btn">ログアウト</button></div>
+  </div>
+  <div id="body-wrap">
+    <nav id="sidebar"></nav>
+    <main id="main"></main>
+  </div>
+</div>
+
+<script>
+// ================= Supabase接続設定 =================
+const SUPABASE_URL = 'https://nbahkykcxlulzkafrmkf.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5iYWhreWtjeGx1bHprYWZybWtmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5MDIzNTIsImV4cCI6MjA5OTQ3ODM1Mn0.ehFxmUVOLzY8t1JkqqMbk1aF6Wr3IrM0Gke0xzZaFC4';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// ================= テーブル定義（アーティファクト版と同じ構成） =================
+const TABLES = [
+  {
+    key: 'equipment_types', label: '設備種別', group: 'マスタ',
+    desc: '設備の"クラス"を定義するマスタ（転てつ機、踏切など）',
+    labelCol: 'equipment_type_name', orderCol: 'id',
+    fields: [
+      { col: 'equipment_type_name', label: '設備種別名称', kind: 'text', required: true },
+      { col: 'system_category_kbn', label: '系統区分', kind: 'select', options: [[1,'施設'],[2,'保線'],[3,'機械'],[4,'電力'],[5,'信通']], required: true },
+      { col: 'equipment_form_kbn', label: '設備形態区分', kind: 'select', options: [[1,'箱もの'],[2,'線もの']], required: true },
+    ],
+  },
+  {
+    key: 'locations', label: '場所', group: 'マスタ',
+    desc: '駅・機器室・キロ程・支持物などの場所マスタ',
+    labelCol: 'location_name', orderCol: 'id',
+    fields: [
+      { col: 'location_type_kbn', label: '場所種別区分', kind: 'select', options: [[1,'駅'],[2,'機器室'],[3,'キロ程'],[4,'支持物']], required: true },
+      { col: 'location_name', label: '場所名称', kind: 'text', required: true },
+      { col: 'parent_location_id', label: '親場所', kind: 'fk', refTable: 'locations', required: false },
+      { col: 'kilo_post', label: 'キロ程値', kind: 'numeric', required: false },
+      { col: 'display_order', label: '表示順', kind: 'int', required: false },
+    ],
+  },
+  {
+    key: 'product_categories', label: '製品種別', group: 'マスタ',
+    desc: '個体の属性スキーマを決めるための製品分類（リレー、遮断機本体等）',
+    labelCol: 'product_category_name', orderCol: 'id',
+    fields: [
+      { col: 'product_category_name', label: '製品種別名称', kind: 'text', required: true },
+    ],
+  },
+  {
+    key: 'equipments', label: '設備', group: '設備台帳',
+    desc: '設備種別×場所の組み合わせで決まるインスタンス',
+    labelCol: null, orderCol: 'id',
+    fields: [
+      { col: 'equipment_type_id', label: '設備種別', kind: 'fk', refTable: 'equipment_types', required: true },
+      { col: 'location_id_from', label: '場所(自)', kind: 'fk', refTable: 'locations', required: true },
+      { col: 'location_id_to', label: '場所(至・線ものの場合)', kind: 'fk', refTable: 'locations', required: false },
+      { col: 'install_date', label: '取付日', kind: 'date', required: false },
+      { col: 'note', label: '備考', kind: 'text', required: false },
+    ],
+  },
+  {
+    key: 'equipment_type_components', label: '構成要素', group: 'マスタ',
+    desc: '設備種別を構成する主装置・付属部品（階層構造・自己参照）',
+    labelCol: 'component_name', orderCol: 'id',
+    fields: [
+      { col: 'equipment_type_id', label: '設備種別', kind: 'fk', refTable: 'equipment_types', required: true },
+      { col: 'parent_component_id', label: '親構成要素（付属部品の場合）', kind: 'fk', refTable: 'equipment_type_components', required: false },
+      { col: 'component_name', label: '構成要素名称', kind: 'text', required: true },
+      { col: 'display_order', label: '表示順', kind: 'int', required: false },
+    ],
+  },
+  {
+    key: 'attribute_definitions', label: '属性定義', group: 'マスタ',
+    desc: '製品種別ごとに管理項目（属性）を定義するマスタ',
+    labelCol: 'attribute_name', orderCol: 'id',
+    fields: [
+      { col: 'product_category_id', label: '製品種別', kind: 'fk', refTable: 'product_categories', required: true },
+      { col: 'attribute_name', label: '属性名称', kind: 'text', required: true },
+      { col: 'data_type_kbn', label: 'データ型区分', kind: 'select', options: [[1,'数値'],[2,'文字'],[3,'日付'],[4,'真偽']], required: true },
+      { col: 'unit', label: '単位', kind: 'text', required: false },
+      { col: 'display_order', label: '表示順', kind: 'int', required: false },
+    ],
+  },
+  {
+    key: 'individuals', label: '個体', group: '設備台帳',
+    desc: '主装置・付属部品として現地に設置される物理製品（メーカー・型式・製造番号）',
+    labelCol: null, orderCol: 'id',
+    fields: [
+      { col: 'product_category_id', label: '製品種別', kind: 'fk', refTable: 'product_categories', required: true },
+      { col: 'maker_name', label: 'メーカー名', kind: 'text', required: false },
+      { col: 'model_number', label: '型式', kind: 'text', required: false },
+      { col: 'serial_number', label: '製造番号', kind: 'text', required: false },
+      { col: 'manufactured_month', label: '製造年月', kind: 'date', required: false },
+      { col: 'note', label: '備考', kind: 'text', required: false },
+    ],
+  },
+  {
+    key: 'individual_attribute_values', label: '個体属性値', group: '設備台帳',
+    desc: '個体ごとに可変な管理項目の値（EAV方式）',
+    labelCol: null, orderCol: 'individual_id',
+    compositeKey: ['individual_id', 'attribute_definition_id'],
+    fields: [
+      { col: 'individual_id', label: '個体', kind: 'fk', refTable: 'individuals', required: true },
+      { col: 'attribute_definition_id', label: '属性定義', kind: 'fk', refTable: 'attribute_definitions', required: true },
+      { col: 'attribute_value', label: '属性値', kind: 'text', required: false },
+    ],
+  },
+  {
+    key: 'individual_installation_histories', label: '個体設置履歴', group: '設備台帳',
+    desc: '個体がどの設備・構成要素スロットにいつ設置されていたかの履歴（要件④）',
+    labelCol: null, orderCol: 'id',
+    fields: [
+      { col: 'individual_id', label: '個体', kind: 'fk', refTable: 'individuals', required: true },
+      { col: 'equipment_id', label: '設備', kind: 'fk', refTable: 'equipments', required: true },
+      { col: 'component_id', label: '構成要素', kind: 'fk', refTable: 'equipment_type_components', required: true },
+      { col: 'installed_date', label: '設置日', kind: 'date', required: true },
+      { col: 'removed_date', label: '撤去日（空欄=現在設置中）', kind: 'date', required: false },
+      { col: 'note', label: '備考', kind: 'text', required: false },
+    ],
+  },
+];
+const TABLE_MAP = Object.fromEntries(TABLES.map(t => [t.key, t]));
+
+function escapeHtml(s) {
+  return String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ================= ログイン画面のロジック =================
+let signupMode = false;
+document.getElementById('tab-login').onclick = () => setMode(false);
+document.getElementById('tab-signup').onclick = () => setMode(true);
+function setMode(isSignup) {
+  signupMode = isSignup;
+  document.getElementById('tab-login').classList.toggle('active', !isSignup);
+  document.getElementById('tab-signup').classList.toggle('active', isSignup);
+  document.getElementById('login-submit').textContent = isSignup ? '新規登録' : 'ログイン';
+  document.getElementById('login-msg').textContent = '';
+}
+document.getElementById('login-submit').onclick = async () => {
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  const msg = document.getElementById('login-msg');
+  msg.className = ''; msg.textContent = '';
+  if (!email || !password) {
+    msg.className = 'err'; msg.textContent = 'メールアドレスとパスワードを入力してください';
+    return;
+  }
+  try {
+    if (signupMode) {
+      const { error } = await sb.auth.signUp({ email, password });
+      if (error) throw error;
+      msg.className = 'ok'; msg.textContent = '登録しました。確認メールの設定によっては、そのままログインできます。';
+    } else {
+      const { error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+    }
+  } catch (e) {
+    msg.className = 'err'; msg.textContent = e.message || String(e);
+  }
+};
+document.getElementById('logout-btn').onclick = () => sb.auth.signOut();
+
+sb.auth.onAuthStateChange((event, session) => {
+  if (session) {
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app-screen').style.display = 'flex';
+    document.getElementById('user-email').textContent = session.user.email;
+    renderSidebar();
+    renderMain();
+  } else {
+    document.getElementById('login-screen').style.display = 'flex';
+    document.getElementById('app-screen').style.display = 'none';
+  }
+});
+
+// ================= アプリ本体（テーブルCRUD） =================
+let activeKey = TABLES[0].key;
+const fkCache = {};
+
+async function loadFkOptions(refTable) {
+  const t = TABLE_MAP[refTable];
+  const cols = t.labelCol ? `id, ${t.labelCol}` : 'id';
+  const { data, error } = await sb.from(refTable).select(cols).order('id');
+  if (error) throw error;
+  const rows = (data || []).map(r => ({ id: r.id, lbl: t.labelCol ? r[t.labelCol] : ('#' + r.id) }));
+  fkCache[refTable] = rows;
+  return rows;
+}
+
+function renderSidebar() {
+  const groups = {};
+  TABLES.forEach(t => { (groups[t.group] = groups[t.group] || []).push(t); });
+  const nav = document.getElementById('sidebar');
+  nav.innerHTML = '';
+  Object.entries(groups).forEach(([g, tabs]) => {
+    const label = document.createElement('div');
+    label.className = 'grp-label';
+    label.textContent = g;
+    nav.appendChild(label);
+    tabs.forEach(t => {
+      const btn = document.createElement('button');
+      btn.className = 'tab-btn' + (t.key === activeKey ? ' active' : '');
+      btn.textContent = t.label;
+      btn.onclick = () => { activeKey = t.key; renderSidebar(); renderMain(); };
+      nav.appendChild(btn);
+    });
+  });
+}
+
+async function renderMain() {
+  const t = TABLE_MAP[activeKey];
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <h1 class="page-title">${t.label}</h1>
+    <p class="desc">${t.desc}</p>
+    <div id="msgbox"></div>
+    <div class="card">
+      <h2>新規登録</h2>
+      <div class="form-grid" id="form-fields"></div>
+      <div style="margin-top:12px;"><button class="btn" id="add-btn">追加</button></div>
+    </div>
+    <div class="card">
+      <div class="toolbar">
+        <h2 style="margin:0;">登録済みデータ</h2>
+        <button class="btn ghost" id="refresh-btn">再読込</button>
+      </div>
+      <div class="table-scroll"><div id="data-table">読み込み中...</div></div>
+    </div>
+  `;
+  document.getElementById('refresh-btn').onclick = () => renderMain();
+
+  const fieldsWrap = document.getElementById('form-fields');
+  fieldsWrap.innerHTML = '';
+  for (const f of t.fields) {
+    const div = document.createElement('div');
+    div.className = 'field';
+    const lab = document.createElement('label');
+    lab.textContent = f.label + (f.required ? ' *' : '');
+    div.appendChild(lab);
+    let input;
+    if (f.kind === 'select') {
+      input = document.createElement('select');
+      input.innerHTML = '<option value="">-- 選択 --</option>' + f.options.map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+    } else if (f.kind === 'fk') {
+      input = document.createElement('select');
+      let opts = [];
+      try { opts = await loadFkOptions(f.refTable); } catch (e) { console.error(e); }
+      input.innerHTML = '<option value="">-- 選択 --</option>' + opts.map(r => `<option value="${r.id}">#${r.id} ${escapeHtml(r.lbl)}</option>`).join('');
+    } else if (f.kind === 'date') {
+      input = document.createElement('input'); input.type = 'date';
+    } else if (f.kind === 'int' || f.kind === 'numeric') {
+      input = document.createElement('input'); input.type = 'number';
+    } else {
+      input = document.createElement('input'); input.type = 'text';
+    }
+    input.id = 'f_' + f.col;
+    div.appendChild(input);
+    fieldsWrap.appendChild(div);
+  }
+  document.getElementById('add-btn').onclick = () => onAdd(t);
+
+  await loadDataTable(t);
+}
+
+function showMsg(text, isErr) {
+  const box = document.getElementById('msgbox');
+  box.innerHTML = `<div class="msg ${isErr ? 'err' : 'ok'}">${escapeHtml(text)}</div>`;
+  if (!isErr) setTimeout(() => { box.innerHTML = ''; }, 4000);
+}
+
+function castVal(v, kind) {
+  if (v === '' || v === null || v === undefined) return null;
+  if (kind === 'int' || kind === 'fk' || kind === 'select') return parseInt(v, 10);
+  if (kind === 'numeric') return parseFloat(v);
+  return v;
+}
+
+async function onAdd(t) {
+  const payload = {};
+  for (const f of t.fields) {
+    const el = document.getElementById('f_' + f.col);
+    const v = el.value;
+    if (f.required && !v) {
+      showMsg(`「${f.label}」は必須です`, true);
+      return;
+    }
+    payload[f.col] = castVal(v, f.kind);
+  }
+  const { error } = await sb.from(t.key).insert(payload);
+  if (error) {
+    showMsg('登録に失敗しました: ' + error.message, true);
+  } else {
+    showMsg('登録しました');
+    renderMain();
+  }
+}
+
+async function onDelete(t, row) {
+  if (!confirm('この行を削除しますか？')) return;
+  let q = sb.from(t.key).delete();
+  if (t.compositeKey) {
+    t.compositeKey.forEach(c => { q = q.eq(c, row[c]); });
+  } else {
+    q = q.eq('id', row.id);
+  }
+  const { error } = await q;
+  if (error) {
+    showMsg('削除に失敗しました（他のデータから参照されている可能性があります）: ' + error.message, true);
+  } else {
+    showMsg('削除しました');
+    renderMain();
+  }
+}
+
+async function loadDataTable(t) {
+  const box = document.getElementById('data-table');
+  const { data: rows, error } = await sb.from(t.key).select('*').order(t.orderCol, { ascending: false }).limit(200);
+  if (error) {
+    box.innerHTML = `<div class="msg err">読み込みエラー: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+  if (!rows || !rows.length) {
+    box.innerHTML = '<div class="empty">データがありません</div>';
+    return;
+  }
+  const cols = Object.keys(rows[0]).filter(c => c !== 'created_at' && c !== 'updated_at');
+  let html = '<table class="data"><thead><tr>' + cols.map(c => `<th>${c}</th>`).join('') + '<th></th></tr></thead><tbody>';
+  rows.forEach((row, idx) => {
+    html += '<tr>' + cols.map(c => {
+      const v = row[c];
+      if (c === 'removed_date' && t.key === 'individual_installation_histories') {
+        return `<td>${v ? escapeHtml(v) : '<span class="badge now">現在設置中</span>'}</td>`;
+      }
+      return `<td>${v === null ? '' : escapeHtml(v)}</td>`;
+    }).join('') + `<td><button class="btn danger" data-idx="${idx}">削除</button></td></tr>`;
+  });
+  html += '</tbody></table>';
+  box.innerHTML = html;
+  box.querySelectorAll('button.danger').forEach(btn => {
+    btn.onclick = () => onDelete(t, rows[parseInt(btn.dataset.idx, 10)]);
+  });
+}
+</script>
+</body>
+</html>
