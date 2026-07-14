@@ -71,6 +71,16 @@
   .btn.danger { background: #B85042; padding: 4px 10px; font-size: 12px; }
   .btn.danger:hover { background: #d0604f; }
   .btn.ghost { background: none; border: 1px solid #D5D8DD; color: #444; }
+  .btn.small { padding: 4px 10px; font-size: 12px; }
+  .modal-overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.4);
+    display: flex; align-items: center; justify-content: center; z-index: 1000;
+  }
+  .modal-box {
+    background: #fff; border-radius: 10px; padding: 22px; width: 420px; max-width: 90vw;
+    max-height: 85vh; overflow-y: auto;
+  }
+  .modal-box h2 { font-size: 15px; margin: 0 0 4px; color: #1E2761; }
   table.data { width: 100%; border-collapse: collapse; font-size: 12.5px; }
   table.data th, table.data td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #EEE; white-space: nowrap; }
   table.data th { color: #666; font-weight: 600; background: #FAFAFB; position: sticky; top: 0; }
@@ -456,13 +466,99 @@ async function loadDataTable(t) {
         return `<td>${v ? escapeHtml(v) : '<span class="badge now">現在設置中</span>'}</td>`;
       }
       return `<td>${v === null ? '' : escapeHtml(v)}</td>`;
-    }).join('') + `<td><button class="btn danger" data-idx="${idx}">削除</button></td></tr>`;
+    }).join('') + `<td style="white-space:nowrap;"><button class="btn ghost small edit-btn" data-idx="${idx}">更新</button> <button class="btn danger" data-idx="${idx}">削除</button></td></tr>`;
   });
   html += '</tbody></table>';
   box.innerHTML = html;
+  box.querySelectorAll('button.edit-btn').forEach(btn => {
+    btn.onclick = () => openEditModal(t, rows[parseInt(btn.dataset.idx, 10)]);
+  });
   box.querySelectorAll('button.danger').forEach(btn => {
     btn.onclick = () => onDelete(t, rows[parseInt(btn.dataset.idx, 10)]);
   });
+}
+
+// ================= 更新モーダル（キー項目・外部キー以外を編集） =================
+function openEditModal(t, row) {
+  const editableFields = t.fields.filter(f => f.kind !== 'fk');
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <h2>${escapeHtml(t.label)}の更新</h2>
+      <p class="desc" style="margin:0 0 14px;">キー項目・外部キー項目は変更できません。</p>
+      <div id="edit-msgbox"></div>
+      <div class="form-grid" id="edit-form-fields" style="margin-bottom:16px; grid-template-columns:1fr;"></div>
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button class="btn ghost" id="edit-cancel-btn">キャンセル</button>
+        <button class="btn" id="edit-save-btn">保存</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const fieldsWrap = overlay.querySelector('#edit-form-fields');
+  if (!editableFields.length) {
+    fieldsWrap.innerHTML = '<div class="empty">このテーブルに編集可能な項目はありません（キー・外部キーのみのため）</div>';
+  }
+  editableFields.forEach(f => {
+    const div = document.createElement('div');
+    div.className = 'field';
+    const lab = document.createElement('label');
+    lab.textContent = f.label + (f.required ? ' *' : '');
+    div.appendChild(lab);
+    let input;
+    const currentVal = row[f.col];
+    if (f.kind === 'select') {
+      input = document.createElement('select');
+      input.innerHTML = '<option value="">-- 選択 --</option>' + f.options.map(([v, l]) =>
+        `<option value="${v}"${String(v) === String(currentVal) ? ' selected' : ''}>${l}</option>`
+      ).join('');
+    } else if (f.kind === 'date') {
+      input = document.createElement('input'); input.type = 'date';
+      input.value = currentVal || '';
+    } else if (f.kind === 'int' || f.kind === 'numeric') {
+      input = document.createElement('input'); input.type = 'number';
+      input.value = (currentVal === null || currentVal === undefined) ? '' : currentVal;
+    } else {
+      input = document.createElement('input'); input.type = 'text';
+      input.value = (currentVal === null || currentVal === undefined) ? '' : currentVal;
+    }
+    input.id = 'ef_' + f.col;
+    div.appendChild(input);
+    fieldsWrap.appendChild(div);
+  });
+
+  overlay.querySelector('#edit-cancel-btn').onclick = () => overlay.remove();
+  overlay.querySelector('#edit-save-btn').onclick = () => onUpdate(t, row, editableFields, overlay);
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+}
+
+async function onUpdate(t, row, editableFields, overlay) {
+  const payload = {};
+  for (const f of editableFields) {
+    const el = overlay.querySelector('#ef_' + f.col);
+    const v = el.value;
+    if (f.required && !v) {
+      overlay.querySelector('#edit-msgbox').innerHTML = `<div class="msg err">「${escapeHtml(f.label)}」は必須です</div>`;
+      return;
+    }
+    payload[f.col] = castVal(v, f.kind);
+  }
+  let q = sb.from(t.key).update(payload);
+  if (t.compositeKey) {
+    t.compositeKey.forEach(c => { q = q.eq(c, row[c]); });
+  } else {
+    q = q.eq('id', row.id);
+  }
+  const { error } = await q;
+  if (error) {
+    overlay.querySelector('#edit-msgbox').innerHTML = `<div class="msg err">更新に失敗しました: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+  overlay.remove();
+  showMsg('更新しました');
+  renderMain();
 }
 
 // ================= 台帳確認画面（設備→構成要素→個体の階層表示） =================
