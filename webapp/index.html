@@ -230,6 +230,12 @@ const TABLES = [
 ];
 const TABLE_MAP = Object.fromEntries(TABLES.map(t => [t.key, t]));
 
+// ================= 台帳確認画面（テーブルをまたいだ表示） =================
+const SPECIAL_VIEWS = [
+  { key: 'ledger_view', label: '台帳確認', group: '台帳確認' },
+];
+const SYSTEM_CATEGORY_LABELS = { 1: '施設', 2: '保線', 3: '機械', 4: '電力', 5: '信通' };
+
 function escapeHtml(s) {
   return String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
@@ -283,8 +289,16 @@ sb.auth.onAuthStateChange((event, session) => {
 });
 
 // ================= アプリ本体（テーブルCRUD） =================
-let activeKey = TABLES[0].key;
+let activeKey = 'ledger_view';
 const fkCache = {};
+const ledgerState = {
+  allEquipments: null,
+  systemFilter: '',
+  selectedEquipmentId: null,
+  components: [],
+  currentIndividuals: [],
+  selectedIndividualId: null,
+};
 
 async function loadFkOptions(refTable) {
   const t = TABLE_MAP[refTable];
@@ -298,7 +312,7 @@ async function loadFkOptions(refTable) {
 
 function renderSidebar() {
   const groups = {};
-  TABLES.forEach(t => { (groups[t.group] = groups[t.group] || []).push(t); });
+  [...SPECIAL_VIEWS, ...TABLES].forEach(t => { (groups[t.group] = groups[t.group] || []).push(t); });
   const nav = document.getElementById('sidebar');
   nav.innerHTML = '';
   Object.entries(groups).forEach(([g, tabs]) => {
@@ -317,6 +331,7 @@ function renderSidebar() {
 }
 
 async function renderMain() {
+  if (activeKey === 'ledger_view') { await renderLedgerView(); return; }
   const t = TABLE_MAP[activeKey];
   const main = document.getElementById('main');
   main.innerHTML = `
@@ -448,6 +463,194 @@ async function loadDataTable(t) {
   box.querySelectorAll('button.danger').forEach(btn => {
     btn.onclick = () => onDelete(t, rows[parseInt(btn.dataset.idx, 10)]);
   });
+}
+
+// ================= 台帳確認画面（設備→構成要素→個体の階層表示） =================
+async function renderLedgerView() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <h1 class="page-title">台帳確認</h1>
+    <p class="desc">設備を選択すると、構成要素（主装置・付属部品）ごとに現在設置されている個体を確認できます。個体をクリックすると属性値・設置履歴を表示します。</p>
+    <div id="msgbox"></div>
+    <div style="display:flex; gap:16px; align-items:flex-start;">
+      <div class="card" style="width:250px; flex-shrink:0; padding:12px;">
+        <h2>設備一覧</h2>
+        <div class="field" style="margin-bottom:10px;">
+          <label>系統で絞り込み</label>
+          <select id="ledger-system-filter">
+            <option value="">すべて</option>
+            <option value="1">施設</option>
+            <option value="2">保線</option>
+            <option value="3">機械</option>
+            <option value="4">電力</option>
+            <option value="5">信通</option>
+          </select>
+        </div>
+        <div id="ledger-equipment-list">読み込み中...</div>
+      </div>
+      <div class="card" style="flex:1; min-width:0;">
+        <div id="ledger-detail"><div class="empty">左の一覧から設備を選択してください</div></div>
+      </div>
+    </div>
+  `;
+  document.getElementById('ledger-system-filter').value = ledgerState.systemFilter;
+  document.getElementById('ledger-system-filter').onchange = (e) => {
+    ledgerState.systemFilter = e.target.value;
+    renderLedgerEquipmentList();
+  };
+  await loadLedgerEquipments();
+}
+
+async function loadLedgerEquipments() {
+  if (ledgerState.allEquipments === null) {
+    const { data, error } = await sb.from('view_equipments_list').select('*').order('id');
+    if (error) {
+      document.getElementById('ledger-equipment-list').innerHTML = `<div class="msg err">読み込みエラー: ${escapeHtml(error.message)}</div>`;
+      return;
+    }
+    ledgerState.allEquipments = data || [];
+  }
+  renderLedgerEquipmentList();
+}
+
+function renderLedgerEquipmentList() {
+  const box = document.getElementById('ledger-equipment-list');
+  if (!box) return;
+  const rows = ledgerState.allEquipments.filter(e =>
+    !ledgerState.systemFilter || String(e.system_category_kbn) === ledgerState.systemFilter
+  );
+  if (!rows.length) {
+    box.innerHTML = '<div class="empty">該当する設備がありません</div>';
+    return;
+  }
+  box.innerHTML = rows.map(e => {
+    const locLabel = (e.location_name_to && e.location_name_to !== e.location_name_from)
+      ? `${escapeHtml(e.location_name_from)}～${escapeHtml(e.location_name_to)}`
+      : escapeHtml(e.location_name_from);
+    const active = e.id === ledgerState.selectedEquipmentId;
+    return `<button class="tab-btn ledger-eq-btn" data-id="${e.id}" style="border-radius:5px; margin-bottom:2px; border-left-width:3px;${active ? ' background:#E8ECF5; border-left-color:#1E2761; color:#1E2761; font-weight:600;' : ''}">
+      ${escapeHtml(e.equipment_type_name)}<br><span style="font-size:11px; color:#888;">${locLabel}</span>
+    </button>`;
+  }).join('');
+  box.querySelectorAll('.ledger-eq-btn').forEach(btn => {
+    btn.onclick = () => selectLedgerEquipment(parseInt(btn.dataset.id, 10));
+  });
+}
+
+async function selectLedgerEquipment(equipmentId) {
+  ledgerState.selectedEquipmentId = equipmentId;
+  ledgerState.selectedIndividualId = null;
+  renderLedgerEquipmentList();
+  const detail = document.getElementById('ledger-detail');
+  detail.innerHTML = '読み込み中...';
+  const eq = ledgerState.allEquipments.find(e => e.id === equipmentId);
+  const [compRes, indRes] = await Promise.all([
+    sb.from('equipment_type_components').select('*').eq('equipment_type_id', eq.equipment_type_id).order('display_order', { ascending: true }).order('id', { ascending: true }),
+    sb.from('view_equipment_current_individuals').select('*').eq('equipment_id', equipmentId),
+  ]);
+  if (compRes.error || indRes.error) {
+    const err = compRes.error || indRes.error;
+    detail.innerHTML = `<div class="msg err">読み込みエラー: ${escapeHtml(err.message)}</div>`;
+    return;
+  }
+  ledgerState.components = compRes.data || [];
+  ledgerState.currentIndividuals = indRes.data || [];
+  renderLedgerDetail(eq);
+}
+
+function renderLedgerDetail(eq) {
+  const detail = document.getElementById('ledger-detail');
+  const indByComponent = {};
+  ledgerState.currentIndividuals.forEach(r => { indByComponent[r.component_id] = r; });
+  const byParent = {};
+  ledgerState.components.forEach(c => {
+    const key = c.parent_component_id || 'root';
+    (byParent[key] = byParent[key] || []).push(c);
+  });
+
+  function renderNode(c, depth) {
+    const ind = indByComponent[c.id];
+    const indentBase = depth * 16;
+    let html = `<div style="padding:6px 0 2px; margin-left:${indentBase}px; font-weight:${depth === 0 ? '600' : '400'};">${depth > 0 ? '└ ' : ''}${escapeHtml(c.component_name)}${depth === 0 ? '<span style="color:#888; font-weight:400; margin-left:6px; font-size:11px;">（主装置）</span>' : ''}</div>`;
+    if (ind) {
+      const selected = ind.individual_id === ledgerState.selectedIndividualId;
+      html += `<div class="ledger-ind-row" data-id="${ind.individual_id}" style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:6px 10px; margin-left:${indentBase + 16}px; border-radius:5px; background:${selected ? '#E8ECF5' : '#FAFAFB'}; margin-bottom:4px; cursor:pointer;">
+        <span>${escapeHtml(ind.maker_name || '')} ${escapeHtml(ind.model_number || '')} ${ind.maker_name || ind.model_number ? '　' : ''}製造番号${escapeHtml(ind.serial_number || '-')}　設置日${escapeHtml(ind.installed_date || '-')}</span>
+        <span style="font-size:12px; color:#1E2761; flex-shrink:0;">詳細 &gt;</span>
+      </div>`;
+    } else {
+      html += `<div class="empty" style="margin-left:${indentBase + 16}px; padding:4px 0;">現在設置されている個体はありません</div>`;
+    }
+    (byParent[c.id] || []).forEach(ch => { html += renderNode(ch, depth + 1); });
+    return html;
+  }
+
+  const roots = byParent['root'] || [];
+  let html = `<div style="display:flex; justify-content:space-between; align-items:baseline; border-bottom:1px solid #EEE; padding-bottom:8px; margin-bottom:10px;">
+    <div style="font-size:15px; font-weight:600; color:#1E2761;">${escapeHtml(eq.equipment_type_name)}
+      <span style="font-size:12px; color:#666; font-weight:400; margin-left:8px;">系統: ${escapeHtml(SYSTEM_CATEGORY_LABELS[eq.system_category_kbn] || '-')} ／ 場所: ${escapeHtml(eq.location_name_from)}${eq.location_name_to && eq.location_name_to !== eq.location_name_from ? '～' + escapeHtml(eq.location_name_to) : ''}</span>
+    </div>
+  </div>`;
+  html += '<div style="font-size:13px;">';
+  html += roots.length ? roots.map(r => renderNode(r, 0)).join('') : '<div class="empty">構成要素が登録されていません</div>';
+  html += '</div>';
+  html += '<div id="ledger-individual-detail" style="margin-top:14px; border-top:1px solid #EEE; padding-top:10px;"></div>';
+  detail.innerHTML = html;
+
+  detail.querySelectorAll('.ledger-ind-row').forEach(row => {
+    row.onclick = () => selectLedgerIndividual(parseInt(row.dataset.id, 10));
+  });
+  if (ledgerState.selectedIndividualId) {
+    renderLedgerIndividualDetail();
+  }
+}
+
+async function selectLedgerIndividual(individualId) {
+  ledgerState.selectedIndividualId = individualId;
+  const eq = ledgerState.allEquipments.find(e => e.id === ledgerState.selectedEquipmentId);
+  renderLedgerDetail(eq);
+  await renderLedgerIndividualDetail();
+}
+
+async function renderLedgerIndividualDetail() {
+  const box = document.getElementById('ledger-individual-detail');
+  if (!box) return;
+  box.innerHTML = '読み込み中...';
+  const individualId = ledgerState.selectedIndividualId;
+  const [attrRes, histRes] = await Promise.all([
+    sb.from('view_individual_attributes').select('*').eq('individual_id', individualId).order('display_order', { ascending: true }),
+    sb.from('view_individual_installation_histories').select('*').eq('individual_id', individualId).order('installed_date', { ascending: false }),
+  ]);
+  if (attrRes.error || histRes.error) {
+    const err = attrRes.error || histRes.error;
+    box.innerHTML = `<div class="msg err">読み込みエラー: ${escapeHtml(err.message)}</div>`;
+    return;
+  }
+  const attrs = attrRes.data || [];
+  const hist = histRes.data || [];
+  let html = `<p style="font-size:12px; color:#666; margin:0 0 8px;">個体詳細（ID: ${individualId}）</p>`;
+  if (attrs.length) {
+    html += '<div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(160px,1fr)); gap:4px 16px; font-size:12.5px; margin-bottom:10px;">';
+    attrs.forEach(a => {
+      html += `<span style="color:#666;">${escapeHtml(a.attribute_name)}</span><span>${escapeHtml(a.attribute_value)}${a.unit ? ' ' + escapeHtml(a.unit) : ''}</span>`;
+    });
+    html += '</div>';
+  } else {
+    html += '<div class="empty" style="margin-bottom:10px;">この個体に属性値の登録はありません</div>';
+  }
+  html += '<p style="font-size:12px; color:#666; margin:0 0 4px;">設置履歴</p>';
+  if (hist.length) {
+    html += '<div style="font-size:12.5px;">';
+    hist.forEach(h => {
+      const period = h.removed_date ? `${h.installed_date} 〜 ${h.removed_date}` : `${h.installed_date} 〜 現在`;
+      const badge = h.removed_date ? '' : ' <span class="badge now">現在設置中</span>';
+      html += `<div style="padding:3px 0;">${escapeHtml(period)}　${escapeHtml(h.equipment_type_name)}／${escapeHtml(h.component_name)}${badge}</div>`;
+    });
+    html += '</div>';
+  } else {
+    html += '<div class="empty">履歴がありません</div>';
+  }
+  box.innerHTML = html;
 }
 </script>
 </body>
