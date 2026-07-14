@@ -459,7 +459,10 @@ async function loadDataTable(t) {
     box.innerHTML = '<div class="empty">データがありません</div>';
     return;
   }
-  const cols = Object.keys(rows[0]).filter(c => c !== 'created_at' && c !== 'updated_at');
+  let cols = Object.keys(rows[0]).filter(c => c !== 'created_at' && c !== 'updated_at');
+  if (t.labelCol && cols.includes('id') && cols.includes(t.labelCol)) {
+    cols = ['id', t.labelCol, ...cols.filter(c => c !== 'id' && c !== t.labelCol)];
+  }
   let html = '<table class="data"><thead><tr>' + cols.map(c => `<th>${c}</th>`).join('') + '<th></th></tr></thead><tbody>';
   rows.forEach((row, idx) => {
     html += '<tr>' + cols.map(c => {
