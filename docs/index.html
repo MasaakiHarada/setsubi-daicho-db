@@ -168,8 +168,9 @@ const TABLES = [
   {
     key: 'equipments', label: '設備', group: '設備台帳',
     desc: '設備種別×場所の組み合わせで決まるインスタンス',
-    labelCol: null, orderCol: 'id',
+    labelCol: 'equipment_name', orderCol: 'id',
     fields: [
+      { col: 'equipment_name', label: '設備名称', kind: 'text', required: true },
       { col: 'equipment_type_id', label: '設備種別', kind: 'fk', refTable: 'equipment_types', required: true },
       { col: 'location_id_from', label: '場所(自)', kind: 'fk', refTable: 'locations', required: true },
       { col: 'location_id_to', label: '場所(至・線ものの場合)', kind: 'fk', refTable: 'locations', required: false },
@@ -203,8 +204,9 @@ const TABLES = [
   {
     key: 'individuals', label: '個体', group: '設備台帳',
     desc: '主装置・付属部品として現地に設置される物理製品（メーカー・型式・製造番号）',
-    labelCol: null, orderCol: 'id',
+    labelCol: 'individual_name', orderCol: 'id',
     fields: [
+      { col: 'individual_name', label: '個体名称', kind: 'text', required: true },
       { col: 'product_category_id', label: '製品種別', kind: 'fk', refTable: 'product_categories', required: true },
       { col: 'maker_name', label: 'メーカー名', kind: 'text', required: false },
       { col: 'model_number', label: '型式', kind: 'text', required: false },
@@ -625,7 +627,7 @@ function renderLedgerEquipmentList() {
       : escapeHtml(e.location_name_from);
     const active = e.id === ledgerState.selectedEquipmentId;
     return `<button class="tab-btn ledger-eq-btn" data-id="${e.id}" style="border-radius:5px; margin-bottom:2px; border-left-width:3px;${active ? ' background:#E8ECF5; border-left-color:#1E2761; color:#1E2761; font-weight:600;' : ''}">
-      ${escapeHtml(e.equipment_type_name)}<br><span style="font-size:11px; color:#888;">${locLabel}</span>
+      ${escapeHtml(e.equipment_name)}<br><span style="font-size:11px; color:#888;">${escapeHtml(e.equipment_type_name)}／${locLabel}</span>
     </button>`;
   }).join('');
   box.querySelectorAll('.ledger-eq-btn').forEach(btn => {
@@ -671,7 +673,7 @@ function renderLedgerDetail(eq) {
     if (ind) {
       const selected = ind.individual_id === ledgerState.selectedIndividualId;
       html += `<div class="ledger-ind-row" data-id="${ind.individual_id}" style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:6px 10px; margin-left:${indentBase + 16}px; border-radius:5px; background:${selected ? '#E8ECF5' : '#FAFAFB'}; margin-bottom:4px; cursor:pointer;">
-        <span>${escapeHtml(ind.maker_name || '')} ${escapeHtml(ind.model_number || '')} ${ind.maker_name || ind.model_number ? '　' : ''}製造番号${escapeHtml(ind.serial_number || '-')}　設置日${escapeHtml(ind.installed_date || '-')}</span>
+        <span><b>${escapeHtml(ind.individual_name)}</b>　${escapeHtml(ind.maker_name || '')} ${escapeHtml(ind.model_number || '')} ${ind.maker_name || ind.model_number ? '　' : ''}製造番号${escapeHtml(ind.serial_number || '-')}　設置日${escapeHtml(ind.installed_date || '-')}</span>
         <span style="font-size:12px; color:#1E2761; flex-shrink:0;">詳細 &gt;</span>
       </div>`;
     } else {
@@ -683,8 +685,8 @@ function renderLedgerDetail(eq) {
 
   const roots = byParent['root'] || [];
   let html = `<div style="display:flex; justify-content:space-between; align-items:baseline; border-bottom:1px solid #EEE; padding-bottom:8px; margin-bottom:10px;">
-    <div style="font-size:15px; font-weight:600; color:#1E2761;">${escapeHtml(eq.equipment_type_name)}
-      <span style="font-size:12px; color:#666; font-weight:400; margin-left:8px;">系統: ${escapeHtml(SYSTEM_CATEGORY_LABELS[eq.system_category_kbn] || '-')} ／ 場所: ${escapeHtml(eq.location_name_from)}${eq.location_name_to && eq.location_name_to !== eq.location_name_from ? '～' + escapeHtml(eq.location_name_to) : ''}</span>
+    <div style="font-size:15px; font-weight:600; color:#1E2761;">${escapeHtml(eq.equipment_name)}
+      <span style="font-size:12px; color:#666; font-weight:400; margin-left:8px;">設備種別: ${escapeHtml(eq.equipment_type_name)} ／ 系統: ${escapeHtml(SYSTEM_CATEGORY_LABELS[eq.system_category_kbn] || '-')} ／ 場所: ${escapeHtml(eq.location_name_from)}${eq.location_name_to && eq.location_name_to !== eq.location_name_from ? '～' + escapeHtml(eq.location_name_to) : ''}</span>
     </div>
   </div>`;
   html += '<div style="font-size:13px;">';
@@ -724,7 +726,9 @@ async function renderLedgerIndividualDetail() {
   }
   const attrs = attrRes.data || [];
   const hist = histRes.data || [];
-  let html = `<p style="font-size:12px; color:#666; margin:0 0 8px;">個体詳細（ID: ${individualId}）</p>`;
+  const indRow = ledgerState.currentIndividuals.find(r => r.individual_id === individualId);
+  const nameLabel = indRow ? escapeHtml(indRow.individual_name) : `ID: ${individualId}`;
+  let html = `<p style="font-size:12px; color:#666; margin:0 0 8px;">個体詳細（${nameLabel}）</p>`;
   if (attrs.length) {
     html += '<div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(160px,1fr)); gap:4px 16px; font-size:12.5px; margin-bottom:10px;">';
     attrs.forEach(a => {

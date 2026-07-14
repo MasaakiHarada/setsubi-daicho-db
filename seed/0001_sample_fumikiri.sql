@@ -5,6 +5,9 @@
 -- 要件④（個体の設置場所が変わることを想定し履歴を管理）の例として、
 -- 上りS方遮断機の個体は旧個体(id=15, 2018年設置→2021年撤去)から
 -- 新個体(id=1, 2021年設置、現在設置中)への更新履歴を含む。
+--
+-- 0004マイグレーション以降、設備名称・個体名称は専用列(equipment_name/individual_name)
+-- に分離しているため、本シードでもそちらに値を設定し、備考(note)はNULLとしている。
 
 -- 1. 設備種別
 INSERT INTO equipment_types (id, equipment_type_name, system_category_kbn, equipment_form_kbn) VALUES
@@ -23,8 +26,8 @@ INSERT INTO product_categories (id, product_category_name) VALUES
 (5, '3Dセンサ');
 
 -- 4. 設備
-INSERT INTO equipments (id, equipment_type_id, location_id_from, location_id_to, install_date, note) VALUES
-(1, 1, 1, NULL, '2021-03-01', '〇〇踏切');
+INSERT INTO equipments (id, equipment_name, equipment_type_id, location_id_from, location_id_to, install_date, note) VALUES
+(1, '〇〇踏切', 1, 1, NULL, '2021-03-01', NULL);
 
 -- 5. 構成要素
 INSERT INTO equipment_type_components (id, equipment_type_id, parent_component_id, component_name, display_order) VALUES
@@ -57,22 +60,22 @@ INSERT INTO attribute_definitions (id, product_category_id, attribute_name, data
 (10, 5, '視野角', 1, '度', 2);
 
 -- 7. 個体
-INSERT INTO individuals (id, product_category_id, maker_name, model_number, serial_number, manufactured_month, note) VALUES
-(1, 1, '日信', '〇〇型', 'SN-2021-0301', '2021-02-01', '上りS方遮断機用本体'),
-(2, 1, '日信', '〇〇型', 'SN-2021-0302', '2021-02-01', '下りS方遮断機用本体'),
-(3, 2, NULL, NULL, 'RY-2021-101', '2021-02-01', '上りCR1リレー'),
-(4, 2, NULL, NULL, 'RY-2021-102', '2021-02-01', '上りCR2リレー'),
-(5, 2, NULL, NULL, 'RY-2021-103', '2021-02-01', '下りCR1リレー'),
-(6, 2, NULL, NULL, 'RY-2021-104', '2021-02-01', '下りCR2リレー'),
-(7, 3, '〇〇電工', '〇〇型', 'SN-2021-0101', '2021-01-01', '踏切制御箱本体'),
-(8, 2, NULL, NULL, 'RY-2021-201', '2021-01-01', '踏切制御箱△△リレー①'),
-(9, 2, NULL, NULL, 'RY-2021-202', '2021-01-01', '踏切制御箱△△リレー②'),
-(10, 2, NULL, NULL, 'RY-2021-203', '2021-01-01', '踏切制御箱△△リレー③'),
-(11, 4, 'IHI', '〇〇型', 'SN-2021-0102', '2021-01-01', '障検制御箱本体'),
-(12, 5, 'IHI', '3DLR型', 'SN-2021-0103', '2021-01-01', '3DLRセンサ1'),
-(13, 5, 'IHI', '3DLR型', 'SN-2021-0104', '2021-01-01', '3DLRセンサ2'),
-(14, 2, NULL, NULL, 'RY-2021-204', '2021-01-01', '障検制御箱◇◇リレー'),
-(15, 1, '日信', '△△型', 'SN-2018-0099', '2018-05-01', '旧・上りS方遮断機用本体（更新済）');
+INSERT INTO individuals (id, individual_name, product_category_id, maker_name, model_number, serial_number, manufactured_month, note) VALUES
+(1, '上りS方遮断機用本体', 1, '日信', '〇〇型', 'SN-2021-0301', '2021-02-01', NULL),
+(2, '下りS方遮断機用本体', 1, '日信', '〇〇型', 'SN-2021-0302', '2021-02-01', NULL),
+(3, '上りCR1リレー', 2, NULL, NULL, 'RY-2021-101', '2021-02-01', NULL),
+(4, '上りCR2リレー', 2, NULL, NULL, 'RY-2021-102', '2021-02-01', NULL),
+(5, '下りCR1リレー', 2, NULL, NULL, 'RY-2021-103', '2021-02-01', NULL),
+(6, '下りCR2リレー', 2, NULL, NULL, 'RY-2021-104', '2021-02-01', NULL),
+(7, '踏切制御箱本体', 3, '〇〇電工', '〇〇型', 'SN-2021-0101', '2021-01-01', NULL),
+(8, '踏切制御箱△△リレー①', 2, NULL, NULL, 'RY-2021-201', '2021-01-01', NULL),
+(9, '踏切制御箱△△リレー②', 2, NULL, NULL, 'RY-2021-202', '2021-01-01', NULL),
+(10, '踏切制御箱△△リレー③', 2, NULL, NULL, 'RY-2021-203', '2021-01-01', NULL),
+(11, '障検制御箱本体', 4, 'IHI', '〇〇型', 'SN-2021-0102', '2021-01-01', NULL),
+(12, '3DLRセンサ1', 5, 'IHI', '3DLR型', 'SN-2021-0103', '2021-01-01', NULL),
+(13, '3DLRセンサ2', 5, 'IHI', '3DLR型', 'SN-2021-0104', '2021-01-01', NULL),
+(14, '障検制御箱◇◇リレー', 2, NULL, NULL, 'RY-2021-204', '2021-01-01', NULL),
+(15, '旧・上りS方遮断機用本体（更新済）', 1, '日信', '△△型', 'SN-2018-0099', '2018-05-01', NULL);
 
 -- 8. 個体属性値
 INSERT INTO individual_attribute_values (individual_id, attribute_definition_id, attribute_value) VALUES
