@@ -312,7 +312,7 @@ const TABLES = [
     labelCol: 'individual_name', orderCol: 'id',
     fields: [
       { col: 'individual_name', label: '個体名称', kind: 'text', required: true },
-      { col: 'product_category_id', label: '製品種別', kind: 'fk', refTable: 'product_categories', required: true },
+      { col: 'product_category_id', label: '製品種別', kind: 'fk', refTable: 'product_categories', required: true, editable: true },
       { col: 'maker_name', label: 'メーカー名', kind: 'text', required: false },
       { col: 'model_number', label: '型式', kind: 'text', required: false },
       { col: 'serial_number', label: '製造番号', kind: 'text', required: false },
@@ -619,15 +619,15 @@ async function loadDataTable(t) {
   });
 }
 
-// ================= 更新モーダル（キー項目・外部キー以外を編集） =================
-function openEditModal(t, row) {
-  const editableFields = t.fields.filter(f => f.kind !== 'fk');
+// ================= 更新モーダル（キー項目・外部キー以外を編集。fieldにeditable:trueを付けた外部キーは編集可） =================
+async function openEditModal(t, row) {
+  const editableFields = t.fields.filter(f => f.kind !== 'fk' || f.editable === true);
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `
     <div class="modal-box">
       <h2>${escapeHtml(t.label)}の更新</h2>
-      <p class="desc" style="margin:0 0 14px;">キー項目・外部キー項目は変更できません。</p>
+      <p class="desc" style="margin:0 0 14px;">キー項目・その他の外部キー項目は変更できません。</p>
       <div id="edit-msgbox"></div>
       <div class="form-grid" id="edit-form-fields" style="margin-bottom:16px; grid-template-columns:1fr;"></div>
       <div style="display:flex; justify-content:flex-end; gap:8px;">
@@ -642,7 +642,7 @@ function openEditModal(t, row) {
   if (!editableFields.length) {
     fieldsWrap.innerHTML = '<div class="empty">このテーブルに編集可能な項目はありません（キー・外部キーのみのため）</div>';
   }
-  editableFields.forEach(f => {
+  for (const f of editableFields) {
     const div = document.createElement('div');
     div.className = 'field';
     const lab = document.createElement('label');
@@ -650,7 +650,14 @@ function openEditModal(t, row) {
     div.appendChild(lab);
     let input;
     const currentVal = row[f.col];
-    if (f.kind === 'select') {
+    if (f.kind === 'fk') {
+      input = document.createElement('select');
+      let opts = [];
+      try { opts = await loadFkOptions(f.refTable); } catch (e) { console.error(e); }
+      input.innerHTML = '<option value="">-- 選択 --</option>' + opts.map(r =>
+        `<option value="${r.id}"${String(r.id) === String(currentVal) ? ' selected' : ''}>#${r.id} ${escapeHtml(r.lbl)}</option>`
+      ).join('');
+    } else if (f.kind === 'select') {
       input = document.createElement('select');
       input.innerHTML = '<option value="">-- 選択 --</option>' + f.options.map(([v, l]) =>
         `<option value="${v}"${String(v) === String(currentVal) ? ' selected' : ''}>${l}</option>`
@@ -668,7 +675,7 @@ function openEditModal(t, row) {
     input.id = 'ef_' + f.col;
     div.appendChild(input);
     fieldsWrap.appendChild(div);
-  });
+  }
 
   overlay.querySelector('#edit-cancel-btn').onclick = () => overlay.remove();
   overlay.querySelector('#edit-save-btn').onclick = () => onUpdate(t, row, editableFields, overlay);
