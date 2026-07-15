@@ -351,6 +351,7 @@ const TABLE_MAP = Object.fromEntries(TABLES.map(t => [t.key, t]));
 const SPECIAL_VIEWS = [
   { key: 'ledger_view', label: '台帳確認', group: '台帳確認' },
   { key: 'product_view', label: '製品確認', group: '台帳確認' },
+  { key: 'equipment_type_view', label: '設備種別確認', group: '台帳確認' },
 ];
 const SYSTEM_CATEGORY_LABELS = { 1: '施設', 2: '保線', 3: '機械', 4: '電力', 5: '信通' };
 const SYSTEM_CATEGORY_COLORS = { 1: '#3E7CB1', 2: '#4C9F70', 3: '#B98A3B', 4: '#B85042', 5: '#6E5AA6' };
@@ -428,6 +429,13 @@ const productState = {
   attributeDefs: [],
   selectedIndividualId: null,
 };
+const equipmentTypeState = {
+  types: null,
+  searchText: '',
+  selectedTypeId: null,
+  components: [],
+  installedEquipments: [],
+};
 
 async function loadFkOptions(refTable) {
   const t = TABLE_MAP[refTable];
@@ -462,6 +470,7 @@ function renderSidebar() {
 async function renderMain() {
   if (activeKey === 'ledger_view') { await renderLedgerView(); return; }
   if (activeKey === 'product_view') { await renderProductView(); return; }
+  if (activeKey === 'equipment_type_view') { await renderEquipmentTypeView(); return; }
   const t = TABLE_MAP[activeKey];
   const main = document.getElementById('main');
   main.innerHTML = `
@@ -1473,6 +1482,257 @@ async function submitProductAttributeValue(individualId) {
   }
   showMsg('属性値を登録しました');
   await renderProductIndividualDetail();
+}
+
+// ================= 設備種別確認画面（構成要素の階層表示・追加・削除、実設置設備の表示） =================
+let equipmentTypesCache = null;
+async function ensureEquipmentTypesLoaded() {
+  if (equipmentTypesCache === null) {
+    const { data, error } = await sb.from('equipment_types').select('*').order('id');
+    if (error) throw error;
+    equipmentTypesCache = data || [];
+  }
+  return equipmentTypesCache;
+}
+
+async function renderEquipmentTypeView() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <h1 class="page-title">設備種別確認</h1>
+    <p class="desc">設備種別を選択すると、構成要素（主装置・付属部品）の階層構造と、実際に設置されている設備を確認できます。構成要素の追加・削除もこの画面から行えます。</p>
+    <div id="msgbox"></div>
+    <div class="ledger-layout">
+      <div class="card ledger-sidebar">
+        <h2>設備種別一覧</h2>
+        <div class="ledger-filters">
+          <div class="field">
+            <label>設備種別名で検索</label>
+            <input type="text" id="eqtype-search" placeholder="例: 転てつ機" autocomplete="off">
+          </div>
+        </div>
+        <div class="ledger-count" id="eqtype-count"></div>
+        <div id="eqtype-list" class="ledger-eq-list">
+          <div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div>
+        </div>
+      </div>
+      <div class="card" style="flex:1; min-width:0;">
+        <div id="eqtype-detail"><div class="empty">左の一覧から設備種別を選択してください</div></div>
+      </div>
+    </div>
+  `;
+  const searchInput = document.getElementById('eqtype-search');
+  searchInput.value = equipmentTypeState.searchText;
+  searchInput.oninput = (e) => { equipmentTypeState.searchText = e.target.value; renderEquipmentTypeList(); };
+  await loadEquipmentTypes();
+}
+
+async function loadEquipmentTypes() {
+  try {
+    equipmentTypeState.types = await ensureEquipmentTypesLoaded();
+  } catch (error) {
+    document.getElementById('eqtype-list').innerHTML = `<div class="msg err">読み込みエラー: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+  renderEquipmentTypeList();
+}
+
+function renderEquipmentTypeList() {
+  const box = document.getElementById('eqtype-list');
+  const countBox = document.getElementById('eqtype-count');
+  if (!box) return;
+  const search = equipmentTypeState.searchText.trim().toLowerCase();
+  const rows = equipmentTypeState.types.filter(t => !search || t.equipment_type_name.toLowerCase().includes(search));
+  if (countBox) countBox.textContent = `${rows.length} / ${equipmentTypeState.types.length} 件`;
+  if (!rows.length) {
+    box.innerHTML = '<div class="empty">該当する設備種別がありません</div>';
+    return;
+  }
+  box.innerHTML = rows.map(t => {
+    const active = t.id === equipmentTypeState.selectedTypeId;
+    const scColor = SYSTEM_CATEGORY_COLORS[t.system_category_kbn] || '#C7CAD1';
+    return `<button class="ledger-eq-item${active ? ' active' : ''}" data-id="${t.id}" style="--sc-color:${scColor};">
+      <div class="eq-name">${escapeHtml(t.equipment_type_name)}</div>
+      <div class="eq-meta"><span class="sc-chip" style="background:${scColor};">${escapeHtml(SYSTEM_CATEGORY_LABELS[t.system_category_kbn] || '-')}</span>${t.equipment_form_kbn === 2 ? '線もの' : '箱もの'}</div>
+    </button>`;
+  }).join('');
+  box.querySelectorAll('.ledger-eq-item').forEach(btn => {
+    btn.onclick = () => selectEquipmentType(parseInt(btn.dataset.id, 10));
+  });
+}
+
+async function selectEquipmentType(typeId) {
+  equipmentTypeState.selectedTypeId = typeId;
+  renderEquipmentTypeList();
+  const detail = document.getElementById('eqtype-detail');
+  detail.innerHTML = '<div class="skeleton-line" style="height:22px; width:40%;"></div><div class="skeleton-line" style="margin-top:14px;"></div><div class="skeleton-line"></div>';
+  const type = equipmentTypeState.types.find(t => t.id === typeId);
+  let allEquipments;
+  try {
+    allEquipments = await ensureEquipmentsLoaded();
+  } catch (error) {
+    detail.innerHTML = `<div class="msg err">読み込みエラー: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+  const { data: compData, error: compError } = await sb.from('equipment_type_components').select('*').eq('equipment_type_id', typeId).order('display_order', { ascending: true }).order('id', { ascending: true });
+  if (compError) {
+    detail.innerHTML = `<div class="msg err">読み込みエラー: ${escapeHtml(compError.message)}</div>`;
+    return;
+  }
+  equipmentTypeState.components = compData || [];
+  equipmentTypeState.installedEquipments = allEquipments.filter(e => e.equipment_type_id === typeId);
+  renderEquipmentTypeDetail(type);
+}
+
+function renderEquipmentTypeDetail(type) {
+  const detail = document.getElementById('eqtype-detail');
+  const byParent = {};
+  equipmentTypeState.components.forEach(c => {
+    const key = c.parent_component_id || 'root';
+    (byParent[key] = byParent[key] || []).push(c);
+  });
+
+  function renderNode(c, depth) {
+    const indentBase = depth * 18;
+    let html = `<div class="tree-node ${depth === 0 ? 'depth0' : 'depth-n'}" style="margin-left:${indentBase}px; display:flex; align-items:center; justify-content:space-between; gap:8px;">
+      <span><span class="node-icon"></span>${escapeHtml(c.component_name)}${depth === 0 ? '<span style="color:#888; font-weight:400; margin-left:6px; font-size:11px;">（主装置）</span>' : ''}</span>
+      <span style="display:flex; gap:4px; flex-shrink:0;">
+        <button class="btn ghost small eqtype-add-child-btn" data-parent-id="${c.id}">子を追加</button>
+        <button class="btn danger eqtype-delete-btn" data-id="${c.id}">削除</button>
+      </span>
+    </div>`;
+    (byParent[c.id] || []).forEach(ch => { html += renderNode(ch, depth + 1); });
+    return html;
+  }
+
+  const roots = byParent['root'] || [];
+  const scColor = SYSTEM_CATEGORY_COLORS[type.system_category_kbn] || '#C7CAD1';
+  let html = `<div class="ledger-detail-head">
+    <div>
+      <div class="eq-title">${escapeHtml(type.equipment_type_name)}</div>
+      <div class="eq-tags">
+        <span class="sc-chip" style="background:${scColor};">${escapeHtml(SYSTEM_CATEGORY_LABELS[type.system_category_kbn] || '-')}</span>
+        <span class="tag">${type.equipment_form_kbn === 2 ? '線もの' : '箱もの'}</span>
+      </div>
+    </div>
+  </div>`;
+
+  html += `<div class="toolbar" style="margin-bottom:8px;">
+    <h2 style="margin:0; font-size:13px; color:#333;">構成要素（主装置・付属部品）</h2>
+    <button class="btn ghost small" id="eqtype-add-root-btn">主装置を追加</button>
+  </div>`;
+  html += `<div id="eqtype-add-component-form" style="display:none; margin-bottom:14px;"></div>`;
+  html += '<div class="ledger-tree">';
+  html += roots.length ? roots.map(r => renderNode(r, 0)).join('') : '<div class="empty">構成要素が登録されていません</div>';
+  html += '</div>';
+
+  html += `<div class="toolbar" style="margin-top:18px;">
+    <h2 style="margin:0; font-size:13px; color:#333;">実際に設置されている設備</h2>
+  </div>`;
+  if (!equipmentTypeState.installedEquipments.length) {
+    html += '<div class="empty">この設備種別で設置されている設備はありません</div>';
+  } else {
+    html += '<div style="display:flex; flex-direction:column; gap:6px;">';
+    html += equipmentTypeState.installedEquipments.map(eq => {
+      const locLabel = (eq.location_name_to && eq.location_name_to !== eq.location_name_from)
+        ? `${escapeHtml(eq.location_name_from)}～${escapeHtml(eq.location_name_to)}`
+        : escapeHtml(eq.location_name_from);
+      return `<div class="ind-card" data-eq-id="${eq.id}">
+        <div>
+          <div class="ind-name">${escapeHtml(eq.equipment_name)}</div>
+          <div class="ind-sub">${locLabel}${eq.install_date ? '　取付日: ' + escapeHtml(eq.install_date) : ''}</div>
+        </div>
+        <div class="go">台帳確認で見る &gt;</div>
+      </div>`;
+    }).join('');
+    html += '</div>';
+  }
+
+  detail.innerHTML = html;
+
+  document.getElementById('eqtype-add-root-btn').onclick = () => toggleEqtypeAddComponentForm(type, null);
+  detail.querySelectorAll('.eqtype-add-child-btn').forEach(btn => {
+    btn.onclick = () => toggleEqtypeAddComponentForm(type, parseInt(btn.dataset.parentId, 10));
+  });
+  detail.querySelectorAll('.eqtype-delete-btn').forEach(btn => {
+    btn.onclick = () => deleteEquipmentTypeComponent(type, parseInt(btn.dataset.id, 10));
+  });
+  detail.querySelectorAll('.ind-card[data-eq-id]').forEach(el => {
+    el.onclick = () => jumpToLedgerEquipment(parseInt(el.dataset.eqId, 10));
+  });
+}
+
+function toggleEqtypeAddComponentForm(type, parentId) {
+  const wrap = document.getElementById('eqtype-add-component-form');
+  const alreadyShowingSame = wrap.style.display !== 'none' && wrap.dataset.parentId === String(parentId);
+  if (alreadyShowingSame) {
+    wrap.style.display = 'none';
+    wrap.innerHTML = '';
+    wrap.dataset.parentId = '';
+    return;
+  }
+  wrap.dataset.parentId = String(parentId);
+  wrap.style.display = '';
+  const parentComponent = parentId ? equipmentTypeState.components.find(c => c.id === parentId) : null;
+  const parentLabel = parentComponent ? parentComponent.component_name : '主装置（トップレベル）';
+  wrap.innerHTML = `
+    <div class="card" style="background:#FAFBFC; margin-bottom:0;">
+      <h2>構成要素を追加（親: ${escapeHtml(parentLabel)}）</h2>
+      <div id="eqtype-comp-msgbox"></div>
+      <div class="form-grid">
+        <div class="field">
+          <label>構成要素名称 *</label>
+          <input type="text" id="eqtype-comp-name">
+        </div>
+        <div class="field">
+          <label>表示順</label>
+          <input type="number" id="eqtype-comp-order">
+        </div>
+      </div>
+      <div style="margin-top:12px;"><button class="btn" id="eqtype-comp-add-btn">登録</button></div>
+    </div>
+  `;
+  document.getElementById('eqtype-comp-add-btn').onclick = () => submitEqtypeComponent(type, parentId);
+}
+
+async function submitEqtypeComponent(type, parentId) {
+  const msgBox = document.getElementById('eqtype-comp-msgbox');
+  const name = document.getElementById('eqtype-comp-name').value.trim();
+  const orderVal = document.getElementById('eqtype-comp-order').value;
+  if (!name) {
+    msgBox.innerHTML = '<div class="msg err">構成要素名称は必須です</div>';
+    return;
+  }
+  const payload = {
+    equipment_type_id: type.id,
+    parent_component_id: parentId || null,
+    component_name: name,
+    display_order: orderVal === '' ? null : parseInt(orderVal, 10),
+  };
+  const { error } = await sb.from('equipment_type_components').insert(payload);
+  if (error) {
+    msgBox.innerHTML = `<div class="msg err">登録に失敗しました: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+  showMsg('構成要素を登録しました');
+  await selectEquipmentType(type.id);
+}
+
+async function deleteEquipmentTypeComponent(type, componentId) {
+  if (!confirm('この構成要素を削除しますか？（下位の構成要素や設置履歴から参照されている場合は削除できません）')) return;
+  const { error } = await sb.from('equipment_type_components').delete().eq('id', componentId);
+  if (error) {
+    showMsg('削除に失敗しました（下位の構成要素や設置履歴から参照されている可能性があります）: ' + error.message, true);
+    return;
+  }
+  showMsg('削除しました');
+  await selectEquipmentType(type.id);
+}
+
+async function jumpToLedgerEquipment(equipmentId) {
+  activeKey = 'ledger_view';
+  renderSidebar();
+  await renderMain();
+  await selectLedgerEquipment(equipmentId);
 }
 </script>
 </body>
