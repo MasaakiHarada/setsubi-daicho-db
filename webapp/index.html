@@ -93,6 +93,75 @@
   .table-scroll { max-height: 320px; overflow: auto; border: 1px solid #EEE; border-radius: 6px; }
   .empty { color: #999; font-size: 12.5px; padding: 10px 0; }
   .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+
+  /* ---------- 台帳確認画面 ---------- */
+  .ledger-layout { display: flex; gap: 16px; align-items: flex-start; }
+  .ledger-sidebar { width: 270px; flex-shrink: 0; padding: 14px; }
+  .ledger-sidebar h2 { font-size: 13px; margin: 0 0 10px; color: #333; }
+  .ledger-filters { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid #EEE; }
+  .ledger-filters .field { margin: 0; }
+  .ledger-count { font-size: 11px; color: #999; margin: 0 0 8px; }
+  .ledger-eq-list { display: flex; flex-direction: column; gap: 4px; max-height: 60vh; overflow-y: auto; }
+  .ledger-eq-item {
+    display: block; width: 100%; text-align: left; border: 1px solid #E4E6EA; border-left: 3px solid var(--sc-color, #C7CAD1);
+    background: #fff; border-radius: 7px; padding: 8px 10px; cursor: pointer; transition: background .12s, box-shadow .12s;
+  }
+  .ledger-eq-item:hover { background: #FAFBFC; box-shadow: 0 1px 4px rgba(30,39,97,0.08); }
+  .ledger-eq-item.active { background: #E8ECF5; border-left-color: #1E2761; box-shadow: none; }
+  .ledger-eq-item .eq-name { font-size: 13px; font-weight: 600; color: #222; }
+  .ledger-eq-item.active .eq-name { color: #1E2761; }
+  .ledger-eq-item .eq-meta { font-size: 11px; color: #888; margin-top: 2px; }
+  .sc-chip { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px; font-weight: 600; margin-right: 5px; color: #fff; vertical-align: 1px; }
+
+  .ledger-detail-head {
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+    border-bottom: 1px solid #EEE; padding-bottom: 10px; margin-bottom: 14px;
+  }
+  .ledger-detail-head .eq-title { font-size: 16px; font-weight: 700; color: #1E2761; }
+  .ledger-detail-head .eq-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .tag { display: inline-flex; align-items: center; font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #F0F1F5; color: #555; }
+
+  .ledger-tree { font-size: 13px; }
+  .tree-node { position: relative; padding: 7px 0 2px 0; }
+  .tree-node.depth0 { font-weight: 600; margin-top: 6px; }
+  .tree-node .node-icon { display: inline-block; width: 8px; height: 8px; margin-right: 7px; border-radius: 2px; background: #1E2761; vertical-align: 1px; }
+  .tree-node.depth-n .node-icon { width: 6px; height: 6px; border-radius: 50%; background: #B7BCC8; }
+
+  .ind-card {
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    padding: 9px 12px; border-radius: 7px; background: #FAFAFB; border: 1px solid transparent; cursor: pointer;
+    transition: background .12s, border-color .12s;
+  }
+  .ind-card:hover { background: #F1F3F8; }
+  .ind-card.active { background: #E8ECF5; border-color: #C6CCEA; }
+  .ind-card .ind-name { font-weight: 600; font-size: 13px; color: #222; }
+  .ind-card .ind-sub { font-size: 11.5px; color: #777; margin-top: 1px; }
+  .ind-card .go { font-size: 11px; color: #1E2761; flex-shrink: 0; }
+
+  .attr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px,1fr)); gap: 8px; margin-bottom: 14px; }
+  .attr-chip { background: #FAFAFB; border: 1px solid #EEE; border-radius: 6px; padding: 6px 10px; }
+  .attr-chip .k { display: block; font-size: 10.5px; color: #888; margin-bottom: 2px; }
+  .attr-chip .v { font-size: 13px; color: #222; }
+
+  .timeline { position: relative; margin-left: 4px; padding-left: 16px; border-left: 2px solid #EDEEF2; }
+  .timeline-item { position: relative; padding-bottom: 12px; font-size: 12.5px; }
+  .timeline-item:last-child { padding-bottom: 0; }
+  .timeline-item::before {
+    content: ''; position: absolute; left: -21px; top: 3px; width: 8px; height: 8px; border-radius: 50%;
+    background: #C7CAD1; border: 2px solid #fff;
+  }
+  .timeline-item.current::before { background: #1E7A3D; }
+  .timeline-item .period { font-weight: 600; color: #333; }
+  .timeline-item .place { color: #777; margin-left: 4px; }
+
+  .skeleton-line { height: 34px; border-radius: 6px; margin-bottom: 6px; background: linear-gradient(90deg,#F1F2F5 25%,#E7E9EE 37%,#F1F2F5 63%); background-size: 400% 100%; animation: shimmer 1.3s infinite; }
+  @keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
+
+  @media (max-width: 860px) {
+    .ledger-layout { flex-direction: column; }
+    .ledger-sidebar { width: 100%; }
+    .ledger-eq-list { max-height: 260px; }
+  }
 </style>
 </head>
 <body>
@@ -247,6 +316,7 @@ const SPECIAL_VIEWS = [
   { key: 'ledger_view', label: '台帳確認', group: '台帳確認' },
 ];
 const SYSTEM_CATEGORY_LABELS = { 1: '施設', 2: '保線', 3: '機械', 4: '電力', 5: '信通' };
+const SYSTEM_CATEGORY_COLORS = { 1: '#3E7CB1', 2: '#4C9F70', 3: '#B98A3B', 4: '#B85042', 5: '#6E5AA6' };
 
 function escapeHtml(s) {
   return String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -306,6 +376,8 @@ const fkCache = {};
 const ledgerState = {
   allEquipments: null,
   systemFilter: '',
+  typeFilter: '',
+  searchText: '',
   selectedEquipmentId: null,
   components: [],
   currentIndividuals: [],
@@ -573,30 +645,50 @@ async function renderLedgerView() {
     <h1 class="page-title">台帳確認</h1>
     <p class="desc">設備を選択すると、構成要素（主装置・付属部品）ごとに現在設置されている個体を確認できます。個体をクリックすると属性値・設置履歴を表示します。</p>
     <div id="msgbox"></div>
-    <div style="display:flex; gap:16px; align-items:flex-start;">
-      <div class="card" style="width:250px; flex-shrink:0; padding:12px;">
+    <div class="ledger-layout">
+      <div class="card ledger-sidebar">
         <h2>設備一覧</h2>
-        <div class="field" style="margin-bottom:10px;">
-          <label>系統で絞り込み</label>
-          <select id="ledger-system-filter">
-            <option value="">すべて</option>
-            <option value="1">施設</option>
-            <option value="2">保線</option>
-            <option value="3">機械</option>
-            <option value="4">電力</option>
-            <option value="5">信通</option>
-          </select>
+        <div class="ledger-filters">
+          <div class="field">
+            <label>設備名称で検索</label>
+            <input type="text" id="ledger-search" placeholder="例: 〇〇踏切" autocomplete="off">
+          </div>
+          <div class="field">
+            <label>系統で絞り込み</label>
+            <select id="ledger-system-filter">
+              <option value="">すべて</option>
+              <option value="1">施設</option>
+              <option value="2">保線</option>
+              <option value="3">機械</option>
+              <option value="4">電力</option>
+              <option value="5">信通</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>設備種別で絞り込み</label>
+            <select id="ledger-type-filter"><option value="">すべて</option></select>
+          </div>
         </div>
-        <div id="ledger-equipment-list">読み込み中...</div>
+        <div class="ledger-count" id="ledger-count"></div>
+        <div id="ledger-equipment-list" class="ledger-eq-list">
+          <div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div>
+        </div>
       </div>
       <div class="card" style="flex:1; min-width:0;">
         <div id="ledger-detail"><div class="empty">左の一覧から設備を選択してください</div></div>
       </div>
     </div>
   `;
+  const searchInput = document.getElementById('ledger-search');
+  searchInput.value = ledgerState.searchText;
+  searchInput.oninput = (e) => { ledgerState.searchText = e.target.value; renderLedgerEquipmentList(); };
   document.getElementById('ledger-system-filter').value = ledgerState.systemFilter;
   document.getElementById('ledger-system-filter').onchange = (e) => {
     ledgerState.systemFilter = e.target.value;
+    renderLedgerEquipmentList();
+  };
+  document.getElementById('ledger-type-filter').onchange = (e) => {
+    ledgerState.typeFilter = e.target.value;
     renderLedgerEquipmentList();
   };
   await loadLedgerEquipments();
@@ -611,15 +703,36 @@ async function loadLedgerEquipments() {
     }
     ledgerState.allEquipments = data || [];
   }
+  populateLedgerTypeFilter();
   renderLedgerEquipmentList();
+}
+
+function populateLedgerTypeFilter() {
+  const sel = document.getElementById('ledger-type-filter');
+  if (!sel) return;
+  const types = [...new Map(ledgerState.allEquipments.map(e => [e.equipment_type_id, e.equipment_type_name])).entries()]
+    .sort((a, b) => a[1].localeCompare(b[1], 'ja'));
+  const current = ledgerState.typeFilter;
+  sel.innerHTML = '<option value="">すべて</option>' + types.map(([id, name]) =>
+    `<option value="${id}"${String(id) === String(current) ? ' selected' : ''}>${escapeHtml(name)}</option>`
+  ).join('');
 }
 
 function renderLedgerEquipmentList() {
   const box = document.getElementById('ledger-equipment-list');
+  const countBox = document.getElementById('ledger-count');
   if (!box) return;
-  const rows = ledgerState.allEquipments.filter(e =>
-    !ledgerState.systemFilter || String(e.system_category_kbn) === ledgerState.systemFilter
-  );
+  const search = ledgerState.searchText.trim().toLowerCase();
+  const rows = ledgerState.allEquipments.filter(e => {
+    if (ledgerState.systemFilter && String(e.system_category_kbn) !== ledgerState.systemFilter) return false;
+    if (ledgerState.typeFilter && String(e.equipment_type_id) !== ledgerState.typeFilter) return false;
+    if (search) {
+      const hay = [e.equipment_name, e.location_name_from, e.location_name_to].filter(Boolean).join(' ').toLowerCase();
+      if (!hay.includes(search)) return false;
+    }
+    return true;
+  });
+  if (countBox) countBox.textContent = `${rows.length} / ${ledgerState.allEquipments.length} 件`;
   if (!rows.length) {
     box.innerHTML = '<div class="empty">該当する設備がありません</div>';
     return;
@@ -629,11 +742,13 @@ function renderLedgerEquipmentList() {
       ? `${escapeHtml(e.location_name_from)}～${escapeHtml(e.location_name_to)}`
       : escapeHtml(e.location_name_from);
     const active = e.id === ledgerState.selectedEquipmentId;
-    return `<button class="tab-btn ledger-eq-btn" data-id="${e.id}" style="border-radius:5px; margin-bottom:2px; border-left-width:3px;${active ? ' background:#E8ECF5; border-left-color:#1E2761; color:#1E2761; font-weight:600;' : ''}">
-      ${escapeHtml(e.equipment_name)}<br><span style="font-size:11px; color:#888;">${escapeHtml(e.equipment_type_name)}／${locLabel}</span>
+    const scColor = SYSTEM_CATEGORY_COLORS[e.system_category_kbn] || '#C7CAD1';
+    return `<button class="ledger-eq-item${active ? ' active' : ''}" data-id="${e.id}" style="--sc-color:${scColor};">
+      <div class="eq-name">${escapeHtml(e.equipment_name)}</div>
+      <div class="eq-meta"><span class="sc-chip" style="background:${scColor};">${escapeHtml(SYSTEM_CATEGORY_LABELS[e.system_category_kbn] || '-')}</span>${escapeHtml(e.equipment_type_name)}／${locLabel}</div>
     </button>`;
   }).join('');
-  box.querySelectorAll('.ledger-eq-btn').forEach(btn => {
+  box.querySelectorAll('.ledger-eq-item').forEach(btn => {
     btn.onclick = () => selectLedgerEquipment(parseInt(btn.dataset.id, 10));
   });
 }
@@ -643,7 +758,7 @@ async function selectLedgerEquipment(equipmentId) {
   ledgerState.selectedIndividualId = null;
   renderLedgerEquipmentList();
   const detail = document.getElementById('ledger-detail');
-  detail.innerHTML = '読み込み中...';
+  detail.innerHTML = '<div class="skeleton-line" style="height:22px; width:40%;"></div><div class="skeleton-line" style="margin-top:14px;"></div><div class="skeleton-line"></div><div class="skeleton-line"></div>';
   const eq = ledgerState.allEquipments.find(e => e.id === equipmentId);
   const [compRes, indRes] = await Promise.all([
     sb.from('equipment_type_components').select('*').eq('equipment_type_id', eq.equipment_type_id).order('display_order', { ascending: true }).order('id', { ascending: true }),
@@ -671,13 +786,16 @@ function renderLedgerDetail(eq) {
 
   function renderNode(c, depth) {
     const ind = indByComponent[c.id];
-    const indentBase = depth * 16;
-    let html = `<div style="padding:6px 0 2px; margin-left:${indentBase}px; font-weight:${depth === 0 ? '600' : '400'};">${depth > 0 ? '└ ' : ''}${escapeHtml(c.component_name)}${depth === 0 ? '<span style="color:#888; font-weight:400; margin-left:6px; font-size:11px;">（主装置）</span>' : ''}</div>`;
+    const indentBase = depth * 18;
+    let html = `<div class="tree-node ${depth === 0 ? 'depth0' : 'depth-n'}" style="margin-left:${indentBase}px;"><span class="node-icon"></span>${escapeHtml(c.component_name)}${depth === 0 ? '<span style="color:#888; font-weight:400; margin-left:6px; font-size:11px;">（主装置）</span>' : ''}</div>`;
     if (ind) {
       const selected = ind.individual_id === ledgerState.selectedIndividualId;
-      html += `<div class="ledger-ind-row" data-id="${ind.individual_id}" style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:6px 10px; margin-left:${indentBase + 16}px; border-radius:5px; background:${selected ? '#E8ECF5' : '#FAFAFB'}; margin-bottom:4px; cursor:pointer;">
-        <span><b>${escapeHtml(ind.individual_name)}</b>　${escapeHtml(ind.maker_name || '')} ${escapeHtml(ind.model_number || '')} ${ind.maker_name || ind.model_number ? '　' : ''}製造番号${escapeHtml(ind.serial_number || '-')}　設置日${escapeHtml(ind.installed_date || '-')}</span>
-        <span style="font-size:12px; color:#1E2761; flex-shrink:0;">詳細 &gt;</span>
+      html += `<div class="ind-card${selected ? ' active' : ''}" data-id="${ind.individual_id}" style="margin-left:${indentBase + 16}px; margin-bottom:4px;">
+        <div>
+          <div class="ind-name">${escapeHtml(ind.individual_name)}</div>
+          <div class="ind-sub">${escapeHtml(ind.maker_name || '')} ${escapeHtml(ind.model_number || '')}${ind.maker_name || ind.model_number ? '　' : ''}製造番号 ${escapeHtml(ind.serial_number || '-')}　設置日 ${escapeHtml(ind.installed_date || '-')}</div>
+        </div>
+        <span class="go">詳細 &gt;</span>
       </div>`;
     } else {
       html += `<div class="empty" style="margin-left:${indentBase + 16}px; padding:4px 0;">現在設置されている個体はありません</div>`;
@@ -687,18 +805,26 @@ function renderLedgerDetail(eq) {
   }
 
   const roots = byParent['root'] || [];
-  let html = `<div style="display:flex; justify-content:space-between; align-items:baseline; border-bottom:1px solid #EEE; padding-bottom:8px; margin-bottom:10px;">
-    <div style="font-size:15px; font-weight:600; color:#1E2761;">${escapeHtml(eq.equipment_name)}
-      <span style="font-size:12px; color:#666; font-weight:400; margin-left:8px;">設備種別: ${escapeHtml(eq.equipment_type_name)} ／ 系統: ${escapeHtml(SYSTEM_CATEGORY_LABELS[eq.system_category_kbn] || '-')} ／ 場所: ${escapeHtml(eq.location_name_from)}${eq.location_name_to && eq.location_name_to !== eq.location_name_from ? '～' + escapeHtml(eq.location_name_to) : ''}</span>
+  const scColor = SYSTEM_CATEGORY_COLORS[eq.system_category_kbn] || '#C7CAD1';
+  const locLabel = eq.location_name_to && eq.location_name_to !== eq.location_name_from
+    ? `${escapeHtml(eq.location_name_from)}～${escapeHtml(eq.location_name_to)}` : escapeHtml(eq.location_name_from);
+  let html = `<div class="ledger-detail-head">
+    <div>
+      <div class="eq-title">${escapeHtml(eq.equipment_name)}</div>
+      <div class="eq-tags">
+        <span class="sc-chip" style="background:${scColor};">${escapeHtml(SYSTEM_CATEGORY_LABELS[eq.system_category_kbn] || '-')}</span>
+        <span class="tag">${escapeHtml(eq.equipment_type_name)}</span>
+        <span class="tag">${locLabel}</span>
+      </div>
     </div>
   </div>`;
-  html += '<div style="font-size:13px;">';
+  html += '<div class="ledger-tree">';
   html += roots.length ? roots.map(r => renderNode(r, 0)).join('') : '<div class="empty">構成要素が登録されていません</div>';
   html += '</div>';
   html += '<div id="ledger-individual-detail" style="margin-top:14px; border-top:1px solid #EEE; padding-top:10px;"></div>';
   detail.innerHTML = html;
 
-  detail.querySelectorAll('.ledger-ind-row').forEach(row => {
+  detail.querySelectorAll('.ind-card').forEach(row => {
     row.onclick = () => selectLedgerIndividual(parseInt(row.dataset.id, 10));
   });
   if (ledgerState.selectedIndividualId) {
@@ -731,23 +857,23 @@ async function renderLedgerIndividualDetail() {
   const hist = histRes.data || [];
   const indRow = ledgerState.currentIndividuals.find(r => r.individual_id === individualId);
   const nameLabel = indRow ? escapeHtml(indRow.individual_name) : `ID: ${individualId}`;
-  let html = `<p style="font-size:12px; color:#666; margin:0 0 8px;">個体詳細（${nameLabel}）</p>`;
+  let html = `<p style="font-size:12px; color:#666; margin:0 0 8px; font-weight:600;">個体詳細（${nameLabel}）</p>`;
   if (attrs.length) {
-    html += '<div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(160px,1fr)); gap:4px 16px; font-size:12.5px; margin-bottom:10px;">';
+    html += '<div class="attr-grid">';
     attrs.forEach(a => {
-      html += `<span style="color:#666;">${escapeHtml(a.attribute_name)}</span><span>${escapeHtml(a.attribute_value)}${a.unit ? ' ' + escapeHtml(a.unit) : ''}</span>`;
+      html += `<div class="attr-chip"><span class="k">${escapeHtml(a.attribute_name)}</span><span class="v">${escapeHtml(a.attribute_value)}${a.unit ? ' ' + escapeHtml(a.unit) : ''}</span></div>`;
     });
     html += '</div>';
   } else {
     html += '<div class="empty" style="margin-bottom:10px;">この個体に属性値の登録はありません</div>';
   }
-  html += '<p style="font-size:12px; color:#666; margin:0 0 4px;">設置履歴</p>';
+  html += '<p style="font-size:12px; color:#666; margin:0 0 8px; font-weight:600;">設置履歴</p>';
   if (hist.length) {
-    html += '<div style="font-size:12.5px;">';
+    html += '<div class="timeline">';
     hist.forEach(h => {
       const period = h.removed_date ? `${h.installed_date} 〜 ${h.removed_date}` : `${h.installed_date} 〜 現在`;
       const badge = h.removed_date ? '' : ' <span class="badge now">現在設置中</span>';
-      html += `<div style="padding:3px 0;">${escapeHtml(period)}　${escapeHtml(h.equipment_type_name)}／${escapeHtml(h.component_name)}${badge}</div>`;
+      html += `<div class="timeline-item${h.removed_date ? '' : ' current'}"><span class="period">${escapeHtml(period)}</span><span class="place">${escapeHtml(h.equipment_type_name)}／${escapeHtml(h.component_name)}</span>${badge}</div>`;
     });
     html += '</div>';
   } else {
