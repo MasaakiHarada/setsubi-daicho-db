@@ -567,6 +567,19 @@ async function loadDataTable(t) {
     box.innerHTML = '<div class="empty">データがありません</div>';
     return;
   }
+
+  // 外部キー列は、idだけでなく参照先の名称も併せて表示する
+  const fkFields = t.fields.filter(f => f.kind === 'fk');
+  const fkLabelMaps = {};
+  if (fkFields.length) {
+    await Promise.all(fkFields.map(async f => {
+      try {
+        const opts = await loadFkOptions(f.refTable);
+        fkLabelMaps[f.col] = new Map(opts.map(o => [o.id, o.lbl]));
+      } catch (e) { console.error(e); }
+    }));
+  }
+
   let cols = Object.keys(rows[0]).filter(c => c !== 'created_at' && c !== 'updated_at');
   if (t.labelCol && cols.includes('id') && cols.includes(t.labelCol)) {
     cols = ['id', t.labelCol, ...cols.filter(c => c !== 'id' && c !== t.labelCol)];
@@ -577,6 +590,11 @@ async function loadDataTable(t) {
       const v = row[c];
       if (c === 'removed_date' && t.key === 'individual_installation_histories') {
         return `<td>${v ? escapeHtml(v) : '<span class="badge now">現在設置中</span>'}</td>`;
+      }
+      if (fkLabelMaps[c]) {
+        if (v === null || v === undefined) return '<td></td>';
+        const label = fkLabelMaps[c].get(v);
+        return `<td>${label ? escapeHtml(label) + `（#${v}）` : escapeHtml(v)}</td>`;
       }
       return `<td>${v === null ? '' : escapeHtml(v)}</td>`;
     }).join('') + `<td style="white-space:nowrap;"><button class="btn ghost small edit-btn" data-idx="${idx}">更新</button> <button class="btn danger" data-idx="${idx}">削除</button></td></tr>`;
@@ -674,7 +692,7 @@ async function onUpdate(t, row, editableFields, overlay) {
   renderMain();
 }
 
-// ================= 台帳確認画面（設備→構成要素→個体の階層表示・交換履歴・交換登録） =================
+// ================= 台帳確認画面（設備→構成要素→個体の階層表示） =================
 async function renderLedgerView() {
   const main = document.getElementById('main');
   main.innerHTML = `
