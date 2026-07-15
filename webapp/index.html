@@ -350,6 +350,7 @@ const TABLE_MAP = Object.fromEntries(TABLES.map(t => [t.key, t]));
 // ================= 台帳確認画面（テーブルをまたいだ表示） =================
 const SPECIAL_VIEWS = [
   { key: 'ledger_view', label: '台帳確認', group: '台帳確認' },
+  { key: 'product_view', label: '製品確認', group: '台帳確認' },
 ];
 const SYSTEM_CATEGORY_LABELS = { 1: '施設', 2: '保線', 3: '機械', 4: '電力', 5: '信通' };
 const SYSTEM_CATEGORY_COLORS = { 1: '#3E7CB1', 2: '#4C9F70', 3: '#B98A3B', 4: '#B85042', 5: '#6E5AA6' };
@@ -419,6 +420,14 @@ const ledgerState = {
   histories: [],
   selectedIndividualId: null,
 };
+const productState = {
+  categories: null,
+  searchText: '',
+  selectedCategoryId: null,
+  individuals: [],
+  attributeDefs: [],
+  selectedIndividualId: null,
+};
 
 async function loadFkOptions(refTable) {
   const t = TABLE_MAP[refTable];
@@ -452,6 +461,7 @@ function renderSidebar() {
 
 async function renderMain() {
   if (activeKey === 'ledger_view') { await renderLedgerView(); return; }
+  if (activeKey === 'product_view') { await renderProductView(); return; }
   const t = TABLE_MAP[activeKey];
   const main = document.getElementById('main');
   main.innerHTML = `
@@ -1162,6 +1172,300 @@ async function submitExchange(overlay, eq, component, currentRec) {
   overlay.remove();
   showMsg(currentRec ? '個体を交換しました' : '個体を設置しました');
   await selectLedgerEquipment(eq.id);
+}
+
+// ================= 製品確認画面（製品種別→個体の階層表示・個体登録・属性値登録） =================
+let productCategoriesCache = null;
+let productIndividualCounts = new Map();
+async function ensureProductCategoriesLoaded() {
+  if (productCategoriesCache === null) {
+    const { data, error } = await sb.from('product_categories').select('*').order('id');
+    if (error) throw error;
+    productCategoriesCache = data || [];
+    const { data: indData, error: indErr } = await sb.from('individuals').select('product_category_id');
+    if (!indErr) {
+      productIndividualCounts = new Map();
+      (indData || []).forEach(r => {
+        productIndividualCounts.set(r.product_category_id, (productIndividualCounts.get(r.product_category_id) || 0) + 1);
+      });
+    }
+  }
+  return productCategoriesCache;
+}
+
+async function renderProductView() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <h1 class="page-title">製品確認</h1>
+    <p class="desc">製品種別を選択すると、その製品種別に属する個体を階層表示で確認できます。個体の新規登録や、個体ごとの属性値の登録もこの画面から行えます。</p>
+    <div id="msgbox"></div>
+    <div class="ledger-layout">
+      <div class="card ledger-sidebar">
+        <h2>製品種別一覧</h2>
+        <div class="ledger-filters">
+          <div class="field">
+            <label>製品種別名で検索</label>
+            <input type="text" id="product-search" placeholder="例: リレー" autocomplete="off">
+          </div>
+        </div>
+        <div class="ledger-count" id="product-count"></div>
+        <div id="product-category-list" class="ledger-eq-list">
+          <div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div>
+        </div>
+      </div>
+      <div class="card" style="flex:1; min-width:0;">
+        <div id="product-detail"><div class="empty">左の一覧から製品種別を選択してください</div></div>
+      </div>
+    </div>
+  `;
+  const searchInput = document.getElementById('product-search');
+  searchInput.value = productState.searchText;
+  searchInput.oninput = (e) => { productState.searchText = e.target.value; renderProductCategoryList(); };
+  await loadProductCategories();
+}
+
+async function loadProductCategories() {
+  try {
+    productState.categories = await ensureProductCategoriesLoaded();
+  } catch (error) {
+    document.getElementById('product-category-list').innerHTML = `<div class="msg err">読み込みエラー: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+  renderProductCategoryList();
+}
+
+function renderProductCategoryList() {
+  const box = document.getElementById('product-category-list');
+  const countBox = document.getElementById('product-count');
+  if (!box) return;
+  const search = productState.searchText.trim().toLowerCase();
+  const rows = productState.categories.filter(c => {
+    if (search && !c.product_category_name.toLowerCase().includes(search)) return false;
+    return true;
+  });
+  if (countBox) countBox.textContent = `${rows.length} / ${productState.categories.length} 件`;
+  if (!rows.length) {
+    box.innerHTML = '<div class="empty">該当する製品種別がありません</div>';
+    return;
+  }
+  box.innerHTML = rows.map(c => {
+    const active = c.id === productState.selectedCategoryId;
+    const count = productIndividualCounts.get(c.id) || 0;
+    return `<button class="ledger-eq-item${active ? ' active' : ''}" data-id="${c.id}">
+      <div class="eq-name">${escapeHtml(c.product_category_name)}</div>
+      <div class="eq-meta">個体 ${count}件</div>
+    </button>`;
+  }).join('');
+  box.querySelectorAll('.ledger-eq-item').forEach(btn => {
+    btn.onclick = () => selectProductCategory(parseInt(btn.dataset.id, 10));
+  });
+}
+
+async function selectProductCategory(catId) {
+  productState.selectedCategoryId = catId;
+  productState.selectedIndividualId = null;
+  renderProductCategoryList();
+  const detail = document.getElementById('product-detail');
+  detail.innerHTML = '<div class="skeleton-line" style="height:22px; width:40%;"></div><div class="skeleton-line" style="margin-top:14px;"></div><div class="skeleton-line"></div>';
+  const cat = productState.categories.find(c => c.id === catId);
+  const [indRes, defRes] = await Promise.all([
+    sb.from('individuals').select('*').eq('product_category_id', catId).order('id'),
+    sb.from('attribute_definitions').select('*').eq('product_category_id', catId).order('display_order', { ascending: true }).order('id', { ascending: true }),
+  ]);
+  if (indRes.error || defRes.error) {
+    const err = indRes.error || defRes.error;
+    detail.innerHTML = `<div class="msg err">読み込みエラー: ${escapeHtml(err.message)}</div>`;
+    return;
+  }
+  productState.individuals = indRes.data || [];
+  productState.attributeDefs = defRes.data || [];
+  renderProductDetail(cat);
+}
+
+function renderProductDetail(cat) {
+  const detail = document.getElementById('product-detail');
+  const indent = 16;
+  let html = `<div class="ledger-detail-head">
+    <div>
+      <div class="eq-title">${escapeHtml(cat.product_category_name)}</div>
+      <div class="eq-tags"><span class="tag">個体 ${productState.individuals.length}件</span></div>
+    </div>
+  </div>`;
+
+  html += '<div class="ledger-tree">';
+  html += `<div class="tree-node depth0"><span class="node-icon"></span>${escapeHtml(cat.product_category_name)}<span style="color:#888; font-weight:400; margin-left:6px; font-size:11px;">（製品種別）</span></div>`;
+  html += `<div class="toolbar" style="margin:6px 0 8px; margin-left:${indent}px;">
+    <span style="font-size:11px; color:#999;">この製品種別に属する個体</span>
+    <button class="btn ghost small" id="product-add-individual-btn">個体を登録する</button>
+  </div>`;
+  html += `<div id="product-add-individual-form" style="display:none; margin-left:${indent}px; margin-bottom:14px;"></div>`;
+
+  if (!productState.individuals.length) {
+    html += `<div class="empty" style="margin-left:${indent}px;">この製品種別に登録された個体はありません</div>`;
+  } else {
+    html += `<div style="display:flex; flex-direction:column; gap:6px; margin-left:${indent}px; margin-bottom:6px;">`;
+    html += productState.individuals.map(ind => {
+      const active = ind.id === productState.selectedIndividualId;
+      return `<div class="ind-card${active ? ' active' : ''}" data-id="${ind.id}">
+        <div>
+          <div class="ind-name">${escapeHtml(ind.individual_name)}</div>
+          <div class="ind-sub">${escapeHtml(ind.maker_name || '')} ${escapeHtml(ind.model_number || '')}${ind.serial_number ? '　No.' + escapeHtml(ind.serial_number) : ''}</div>
+        </div>
+        <div class="go">詳細 &gt;</div>
+      </div>`;
+    }).join('');
+    html += '</div>';
+  }
+  html += '</div>';
+
+  html += `<div id="product-individual-detail" style="margin-top:10px; margin-left:${indent}px;"></div>`;
+  detail.innerHTML = html;
+
+  detail.querySelectorAll('.ind-card').forEach(el => {
+    el.onclick = () => selectProductIndividual(parseInt(el.dataset.id, 10));
+  });
+  document.getElementById('product-add-individual-btn').onclick = () => toggleProductAddIndividualForm(cat);
+
+  if (productState.selectedIndividualId) {
+    renderProductIndividualDetail();
+  }
+}
+
+function toggleProductAddIndividualForm(cat) {
+  const wrap = document.getElementById('product-add-individual-form');
+  const isShowing = wrap.style.display !== 'none';
+  if (isShowing) {
+    wrap.style.display = 'none';
+    wrap.innerHTML = '';
+    return;
+  }
+  wrap.style.display = '';
+  wrap.innerHTML = `
+    <div class="card" style="background:#FAFBFC; margin-bottom:0;">
+      <h2>個体を登録（製品種別: ${escapeHtml(cat.product_category_name)}）</h2>
+      <div id="product-ind-msgbox"></div>
+      <div class="form-grid" id="product-ind-fields"></div>
+      <div style="margin-top:12px;"><button class="btn" id="product-ind-add-btn">登録</button></div>
+    </div>
+  `;
+  const fieldsWrap = document.getElementById('product-ind-fields');
+  const fields = TABLE_MAP['individuals'].fields.filter(f => f.col !== 'product_category_id');
+  fields.forEach(f => {
+    const div = document.createElement('div');
+    div.className = 'field';
+    const lab = document.createElement('label');
+    lab.textContent = f.label + (f.required ? ' *' : '');
+    div.appendChild(lab);
+    let input;
+    if (f.kind === 'date') { input = document.createElement('input'); input.type = 'date'; }
+    else { input = document.createElement('input'); input.type = 'text'; }
+    input.id = 'pind_' + f.col;
+    div.appendChild(input);
+    fieldsWrap.appendChild(div);
+  });
+  document.getElementById('product-ind-add-btn').onclick = () => submitProductIndividual(cat, fields);
+}
+
+async function submitProductIndividual(cat, fields) {
+  const msgBox = document.getElementById('product-ind-msgbox');
+  const payload = { product_category_id: cat.id };
+  for (const f of fields) {
+    const el = document.getElementById('pind_' + f.col);
+    const v = el.value;
+    if (f.required && !v) {
+      msgBox.innerHTML = `<div class="msg err">「${escapeHtml(f.label)}」は必須です</div>`;
+      return;
+    }
+    payload[f.col] = castVal(v, f.kind);
+  }
+  const { error } = await sb.from('individuals').insert(payload);
+  if (error) {
+    msgBox.innerHTML = `<div class="msg err">登録に失敗しました: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+  individualsCache = null; // 個体交換登録モーダルのキャッシュも無効化
+  productIndividualCounts.set(cat.id, (productIndividualCounts.get(cat.id) || 0) + 1);
+  showMsg('個体を登録しました');
+  await selectProductCategory(cat.id);
+}
+
+async function selectProductIndividual(individualId) {
+  productState.selectedIndividualId = individualId;
+  const cat = productState.categories.find(c => c.id === productState.selectedCategoryId);
+  renderProductDetail(cat);
+  await renderProductIndividualDetail();
+}
+
+async function renderProductIndividualDetail() {
+  const box = document.getElementById('product-individual-detail');
+  if (!box) return;
+  box.innerHTML = '読み込み中...';
+  const individualId = productState.selectedIndividualId;
+  const { data, error } = await sb.from('view_individual_attributes').select('*').eq('individual_id', individualId).order('display_order', { ascending: true });
+  if (error) {
+    box.innerHTML = `<div class="msg err">読み込みエラー: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+  const attrs = data || [];
+  const usedDefIds = new Set(attrs.map(a => a.attribute_definition_id));
+  const availableDefs = productState.attributeDefs.filter(d => !usedDefIds.has(d.id));
+
+  let html = '<p style="font-size:12px; color:#666; margin:0 0 8px; font-weight:600;">属性値</p>';
+  if (attrs.length) {
+    html += '<div class="attr-grid">';
+    attrs.forEach(a => {
+      html += `<div class="attr-chip"><span class="k">${escapeHtml(a.attribute_name)}</span><span class="v">${escapeHtml(a.attribute_value)}${a.unit ? ' ' + escapeHtml(a.unit) : ''}</span></div>`;
+    });
+    html += '</div>';
+  } else {
+    html += '<div class="empty" style="margin-bottom:10px;">この個体に属性値の登録はありません</div>';
+  }
+
+  html += '<div id="product-attr-msgbox"></div>';
+  if (availableDefs.length) {
+    html += `<div class="form-grid" style="margin-top:10px; align-items:end;">
+      <div class="field">
+        <label>属性を追加</label>
+        <select id="product-attr-def-select">${availableDefs.map(d => `<option value="${d.id}">${escapeHtml(d.attribute_name)}${d.unit ? '（' + escapeHtml(d.unit) + '）' : ''}</option>`).join('')}</select>
+      </div>
+      <div class="field">
+        <label>値</label>
+        <input type="text" id="product-attr-value-input">
+      </div>
+      <div><button class="btn" id="product-attr-add-btn">追加</button></div>
+    </div>`;
+  } else if (productState.attributeDefs.length) {
+    html += '<div class="empty" style="margin-top:8px;">この製品種別で定義されている属性はすべて登録済みです</div>';
+  } else {
+    html += '<div class="empty" style="margin-top:8px;">この製品種別には属性定義がありません（「属性定義」画面で追加できます）</div>';
+  }
+
+  box.innerHTML = html;
+  const addBtn = document.getElementById('product-attr-add-btn');
+  if (addBtn) addBtn.onclick = () => submitProductAttributeValue(individualId);
+}
+
+async function submitProductAttributeValue(individualId) {
+  const msgBox = document.getElementById('product-attr-msgbox');
+  const defSel = document.getElementById('product-attr-def-select');
+  const valInput = document.getElementById('product-attr-value-input');
+  const attributeDefinitionId = parseInt(defSel.value, 10);
+  const value = valInput.value;
+  if (!value) {
+    msgBox.innerHTML = '<div class="msg err">値を入力してください</div>';
+    return;
+  }
+  const { error } = await sb.from('individual_attribute_values').insert({
+    individual_id: individualId,
+    attribute_definition_id: attributeDefinitionId,
+    attribute_value: value,
+  });
+  if (error) {
+    msgBox.innerHTML = `<div class="msg err">登録に失敗しました: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+  showMsg('属性値を登録しました');
+  await renderProductIndividualDetail();
 }
 </script>
 </body>
