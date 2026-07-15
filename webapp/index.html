@@ -183,6 +183,21 @@
   .exchange-box .meta { font-size: 11px; color: #777; margin-top: 2px; }
   .exchange-arrow { flex-shrink: 0; color: #1E2761; font-size: 16px; font-weight: 700; }
   .exchange-note { font-size: 11.5px; color: #666; margin-top: 8px; padding-top: 8px; border-top: 1px dashed #EEE; }
+  .go { font-size: 11px; color: #1E2761; margin-top: 4px; }
+  .exchange-box.new[data-individual-id], .exchange-initial[data-individual-id] {
+    cursor: pointer; transition: box-shadow .12s, outline-color .12s;
+  }
+  .exchange-box.new[data-individual-id]:hover, .exchange-initial[data-individual-id]:hover { box-shadow: 0 1px 4px rgba(30,39,97,0.12); }
+  .exchange-box.new.selected, .exchange-initial.selected { outline: 2px solid #1E2761; outline-offset: 1px; }
+  .action-row { margin-bottom: 12px; }
+
+  /* ---------- 個体交換登録モーダル ---------- */
+  .toggle-group { display: flex; gap: 6px; margin-bottom: 14px; }
+  .toggle-btn {
+    flex: 1; padding: 7px 0; border: 1px solid #D5D8DD; background: #FAFAFB; border-radius: 6px;
+    font-size: 12.5px; cursor: pointer; color: #555;
+  }
+  .toggle-btn.active { background: #1E2761; color: #fff; border-color: #1E2761; }
 </style>
 </head>
 <body>
@@ -335,7 +350,6 @@ const TABLE_MAP = Object.fromEntries(TABLES.map(t => [t.key, t]));
 // ================= 台帳確認画面（テーブルをまたいだ表示） =================
 const SPECIAL_VIEWS = [
   { key: 'ledger_view', label: '台帳確認', group: '台帳確認' },
-  { key: 'exchange_view', label: '設備交換履歴', group: '台帳確認' },
 ];
 const SYSTEM_CATEGORY_LABELS = { 1: '施設', 2: '保線', 3: '機械', 4: '電力', 5: '信通' };
 const SYSTEM_CATEGORY_COLORS = { 1: '#3E7CB1', 2: '#4C9F70', 3: '#B98A3B', 4: '#B85042', 5: '#6E5AA6' };
@@ -402,17 +416,8 @@ const ledgerState = {
   searchText: '',
   selectedEquipmentId: null,
   components: [],
-  currentIndividuals: [],
-  selectedIndividualId: null,
-};
-const exchangeState = {
-  allEquipments: null,
-  systemFilter: '',
-  typeFilter: '',
-  searchText: '',
-  selectedEquipmentId: null,
-  components: [],
   histories: [],
+  selectedIndividualId: null,
 };
 
 async function loadFkOptions(refTable) {
@@ -447,7 +452,6 @@ function renderSidebar() {
 
 async function renderMain() {
   if (activeKey === 'ledger_view') { await renderLedgerView(); return; }
-  if (activeKey === 'exchange_view') { await renderExchangeView(); return; }
   const t = TABLE_MAP[activeKey];
   const main = document.getElementById('main');
   main.innerHTML = `
@@ -675,7 +679,7 @@ async function renderLedgerView() {
   const main = document.getElementById('main');
   main.innerHTML = `
     <h1 class="page-title">台帳確認</h1>
-    <p class="desc">設備を選択すると、構成要素（主装置・付属部品）ごとに現在設置されている個体を確認できます。個体をクリックすると属性値・設置履歴を表示します。</p>
+    <p class="desc">設備を選択すると、構成要素（主装置・付属部品）ごとに個体の設置・交換履歴を時系列で確認できます。個体をクリックすると属性値を表示、「交換する」ボタンから新しい個体への交換・設置を登録できます。</p>
     <div id="msgbox"></div>
     <div class="ledger-layout">
       <div class="card ledger-sidebar">
@@ -801,47 +805,82 @@ async function selectLedgerEquipment(equipmentId) {
   const detail = document.getElementById('ledger-detail');
   detail.innerHTML = '<div class="skeleton-line" style="height:22px; width:40%;"></div><div class="skeleton-line" style="margin-top:14px;"></div><div class="skeleton-line"></div><div class="skeleton-line"></div>';
   const eq = ledgerState.allEquipments.find(e => e.id === equipmentId);
-  const [compRes, indRes] = await Promise.all([
+  const [compRes, histRes] = await Promise.all([
     sb.from('equipment_type_components').select('*').eq('equipment_type_id', eq.equipment_type_id).order('display_order', { ascending: true }).order('id', { ascending: true }),
-    sb.from('view_equipment_current_individuals').select('*').eq('equipment_id', equipmentId),
+    sb.from('view_equipment_installation_histories').select('*').eq('equipment_id', equipmentId).order('installed_date', { ascending: true }),
   ]);
-  if (compRes.error || indRes.error) {
-    const err = compRes.error || indRes.error;
+  if (compRes.error || histRes.error) {
+    const err = compRes.error || histRes.error;
     detail.innerHTML = `<div class="msg err">読み込みエラー: ${escapeHtml(err.message)}</div>`;
     return;
   }
   ledgerState.components = compRes.data || [];
-  ledgerState.currentIndividuals = indRes.data || [];
+  ledgerState.histories = histRes.data || [];
   renderLedgerDetail(eq);
 }
 
 function renderLedgerDetail(eq) {
   const detail = document.getElementById('ledger-detail');
-  const indByComponent = {};
-  ledgerState.currentIndividuals.forEach(r => { indByComponent[r.component_id] = r; });
+  const histByComponent = {};
+  ledgerState.histories.forEach(h => {
+    (histByComponent[h.component_id] = histByComponent[h.component_id] || []).push(h);
+  });
+  Object.values(histByComponent).forEach(list => list.sort((a, b) => (a.installed_date < b.installed_date ? -1 : a.installed_date > b.installed_date ? 1 : 0)));
+
   const byParent = {};
   ledgerState.components.forEach(c => {
     const key = c.parent_component_id || 'root';
     (byParent[key] = byParent[key] || []).push(c);
   });
 
-  function renderNode(c, depth) {
-    const ind = indByComponent[c.id];
+  function individualBox(rec, isCurrent) {
+    const selected = isCurrent && rec.individual_id === ledgerState.selectedIndividualId;
+    return `<div class="exchange-box ${isCurrent ? 'new' : 'old'}${selected ? ' selected' : ''}"${isCurrent ? ` data-individual-id="${rec.individual_id}"` : ''}>
+      <div class="lbl">${isCurrent ? '現在' : '旧'}</div>
+      <div class="nm">${escapeHtml(rec.individual_name)}</div>
+      <div class="meta">${escapeHtml(rec.maker_name || '')} ${escapeHtml(rec.model_number || '')}${rec.serial_number ? '　No.' + escapeHtml(rec.serial_number) : ''}</div>
+      ${isCurrent ? '<div class="go">詳細 &gt;</div>' : ''}
+    </div>`;
+  }
+
+  function renderComponentBlock(c, depth) {
     const indentBase = depth * 18;
     let html = `<div class="tree-node ${depth === 0 ? 'depth0' : 'depth-n'}" style="margin-left:${indentBase}px;"><span class="node-icon"></span>${escapeHtml(c.component_name)}${depth === 0 ? '<span style="color:#888; font-weight:400; margin-left:6px; font-size:11px;">（主装置）</span>' : ''}</div>`;
-    if (ind) {
-      const selected = ind.individual_id === ledgerState.selectedIndividualId;
-      html += `<div class="ind-card${selected ? ' active' : ''}" data-id="${ind.individual_id}" style="margin-left:${indentBase + 16}px; margin-bottom:4px;">
-        <div>
-          <div class="ind-name">${escapeHtml(ind.individual_name)}</div>
-          <div class="ind-sub">${escapeHtml(ind.maker_name || '')} ${escapeHtml(ind.model_number || '')}${ind.maker_name || ind.model_number ? '　' : ''}製造番号 ${escapeHtml(ind.serial_number || '-')}　設置日 ${escapeHtml(ind.installed_date || '-')}</div>
-        </div>
-        <span class="go">詳細 &gt;</span>
-      </div>`;
+    const list = histByComponent[c.id] || [];
+    let hasCurrent = false;
+    if (!list.length) {
+      html += `<div class="empty" style="margin-left:${indentBase + 16}px; padding:4px 0;">設置履歴がありません</div>`;
     } else {
-      html += `<div class="empty" style="margin-left:${indentBase + 16}px; padding:4px 0;">現在設置されている個体はありません</div>`;
+      const first = list[0];
+      const firstIsCurrent = !first.removed_date;
+      if (firstIsCurrent) hasCurrent = true;
+      const firstSelected = firstIsCurrent && first.individual_id === ledgerState.selectedIndividualId;
+      html += `<div class="exchange-initial${firstSelected ? ' selected' : ''}" style="margin-left:${indentBase + 16}px;"${firstIsCurrent ? ` data-individual-id="${first.individual_id}"` : ''}>
+        <div class="lbl">初回設置${firstIsCurrent ? '（現在設置中）' : ''}</div>
+        <div class="nm">${escapeHtml(first.individual_name)}</div>
+        <div class="meta">${escapeHtml(first.installed_date)} 設置${first.removed_date ? '　〜　' + escapeHtml(first.removed_date) + ' 撤去' : ''}</div>
+        ${firstIsCurrent ? '<div class="go">詳細 &gt;</div>' : ''}
+      </div>`;
+      for (let i = 1; i < list.length; i++) {
+        const prev = list[i - 1];
+        const curr = list[i];
+        const isCurrent = !curr.removed_date;
+        if (isCurrent) hasCurrent = true;
+        html += `<div class="exchange-card" style="margin-left:${indentBase + 16}px;">
+          <div class="exchange-date">${escapeHtml(curr.installed_date)} に交換${isCurrent ? ' <span class="badge now">現在設置中</span>' : ''}</div>
+          <div class="exchange-row">
+            ${individualBox(prev, false)}
+            <span class="exchange-arrow">→</span>
+            ${individualBox(curr, true)}
+          </div>
+          ${curr.note ? `<div class="exchange-note">${escapeHtml(curr.note)}</div>` : ''}
+        </div>`;
+      }
     }
-    (byParent[c.id] || []).forEach(ch => { html += renderNode(ch, depth + 1); });
+    html += `<div class="action-row" style="margin-left:${indentBase + 16}px;">
+      <button class="btn ghost small exchange-btn" data-component-id="${c.id}">${hasCurrent ? '個体を交換する' : '個体を設置する'}</button>
+    </div>`;
+    (byParent[c.id] || []).forEach(ch => { html += renderComponentBlock(ch, depth + 1); });
     return html;
   }
 
@@ -860,13 +899,22 @@ function renderLedgerDetail(eq) {
     </div>
   </div>`;
   html += '<div class="ledger-tree">';
-  html += roots.length ? roots.map(r => renderNode(r, 0)).join('') : '<div class="empty">構成要素が登録されていません</div>';
+  html += roots.length ? roots.map(r => renderComponentBlock(r, 0)).join('') : '<div class="empty">構成要素が登録されていません</div>';
   html += '</div>';
   html += '<div id="ledger-individual-detail" style="margin-top:14px; border-top:1px solid #EEE; padding-top:10px;"></div>';
   detail.innerHTML = html;
 
-  detail.querySelectorAll('.ind-card').forEach(row => {
-    row.onclick = () => selectLedgerIndividual(parseInt(row.dataset.id, 10));
+  detail.querySelectorAll('[data-individual-id]').forEach(el => {
+    el.onclick = () => selectLedgerIndividual(parseInt(el.dataset.individualId, 10));
+  });
+  detail.querySelectorAll('.exchange-btn').forEach(btn => {
+    btn.onclick = () => {
+      const componentId = parseInt(btn.dataset.componentId, 10);
+      const component = ledgerState.components.find(c => c.id === componentId);
+      const list = histByComponent[componentId] || [];
+      const currentRec = list.find(h => !h.removed_date) || null;
+      openExchangeModal(eq, component, currentRec);
+    };
   });
   if (ledgerState.selectedIndividualId) {
     renderLedgerIndividualDetail();
@@ -896,7 +944,8 @@ async function renderLedgerIndividualDetail() {
   }
   const attrs = attrRes.data || [];
   const hist = histRes.data || [];
-  const indRow = ledgerState.currentIndividuals.find(r => r.individual_id === individualId);
+  const indRow = ledgerState.histories.find(r => r.individual_id === individualId && !r.removed_date)
+    || ledgerState.histories.find(r => r.individual_id === individualId);
   const nameLabel = indRow ? escapeHtml(indRow.individual_name) : `ID: ${individualId}`;
   let html = `<p style="font-size:12px; color:#666; margin:0 0 8px; font-weight:600;">個体詳細（${nameLabel}）</p>`;
   if (attrs.length) {
@@ -908,7 +957,7 @@ async function renderLedgerIndividualDetail() {
   } else {
     html += '<div class="empty" style="margin-bottom:10px;">この個体に属性値の登録はありません</div>';
   }
-  html += '<p style="font-size:12px; color:#666; margin:0 0 8px; font-weight:600;">設置履歴</p>';
+  html += '<p style="font-size:12px; color:#666; margin:0 0 8px; font-weight:600;">この個体の全設置履歴（他設備への移動がある場合を含む）</p>';
   if (hist.length) {
     html += '<div class="timeline">';
     hist.forEach(h => {
@@ -923,211 +972,178 @@ async function renderLedgerIndividualDetail() {
   box.innerHTML = html;
 }
 
-// ================= 設備交換履歴画面（設備→構成要素ごとの個体交換を時系列表示） =================
-async function renderExchangeView() {
-  const main = document.getElementById('main');
-  main.innerHTML = `
-    <h1 class="page-title">設備交換履歴</h1>
-    <p class="desc">設備を選択すると、構成要素（主装置・付属部品）ごとに個体の交換履歴を時系列で確認できます。個体設置履歴（ローテーション交換等）が設備台帳上でどのように積み重なっているかを表す画面です。</p>
-    <div id="msgbox"></div>
-    <div class="ledger-layout">
-      <div class="card ledger-sidebar">
-        <h2>設備一覧</h2>
-        <div class="ledger-filters">
-          <div class="field">
-            <label>設備名称で検索</label>
-            <input type="text" id="exchange-search" placeholder="例: 〇〇踏切" autocomplete="off">
-          </div>
-          <div class="field">
-            <label>系統で絞り込み</label>
-            <select id="exchange-system-filter">
-              <option value="">すべて</option>
-              <option value="1">施設</option>
-              <option value="2">保線</option>
-              <option value="3">機械</option>
-              <option value="4">電力</option>
-              <option value="5">信通</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>設備種別で絞り込み</label>
-            <select id="exchange-type-filter"><option value="">すべて</option></select>
-          </div>
-        </div>
-        <div class="ledger-count" id="exchange-count"></div>
-        <div id="exchange-equipment-list" class="ledger-eq-list">
-          <div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div>
-        </div>
+// ================= 個体交換登録（モーダル） =================
+let individualsCache = null;
+async function ensureIndividualsLoaded() {
+  if (individualsCache === null) {
+    const { data, error } = await sb.from('individuals')
+      .select('id, individual_name, maker_name, model_number, serial_number')
+      .order('id');
+    if (error) throw error;
+    individualsCache = data || [];
+  }
+  return individualsCache;
+}
+
+async function openExchangeModal(eq, component, currentRec) {
+  const today = new Date().toISOString().slice(0, 10);
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-box" style="width:460px;">
+      <h2>${currentRec ? '個体交換の登録' : '個体設置の登録'}</h2>
+      <p class="desc" style="margin:0 0 14px;">
+        設備: ${escapeHtml(eq.equipment_name)} ／ 構成要素: ${escapeHtml(component.component_name)}
+        ${currentRec ? `<br>現在設置中: ${escapeHtml(currentRec.individual_name)}（設置日 ${escapeHtml(currentRec.installed_date)}）` : ''}
+      </p>
+      <div id="exmodal-msgbox"></div>
+      <div class="toggle-group">
+        <button type="button" class="toggle-btn active" id="exmodal-mode-existing">既存の個体から選択</button>
+        <button type="button" class="toggle-btn" id="exmodal-mode-new">新しい個体を登録</button>
       </div>
-      <div class="card" style="flex:1; min-width:0;">
-        <div id="exchange-detail"><div class="empty">左の一覧から設備を選択してください</div></div>
+      <div id="exmodal-existing-wrap" class="field">
+        <label>個体 *</label>
+        <select id="exmodal-individual-select"><option value="">読み込み中...</option></select>
+      </div>
+      <div id="exmodal-new-wrap" class="form-grid" style="display:none; margin-bottom:4px;"></div>
+      <div class="field" style="margin-top:10px;">
+        <label>${currentRec ? '交換日' : '設置日'} *</label>
+        <input type="date" id="exmodal-date" value="${today}">
+      </div>
+      <div class="field" style="margin-top:10px;">
+        <label>備考（交換理由など）</label>
+        <input type="text" id="exmodal-note">
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+        <button class="btn ghost" id="exmodal-cancel-btn">キャンセル</button>
+        <button class="btn" id="exmodal-submit-btn">登録</button>
       </div>
     </div>
   `;
-  const searchInput = document.getElementById('exchange-search');
-  searchInput.value = exchangeState.searchText;
-  searchInput.oninput = (e) => { exchangeState.searchText = e.target.value; renderExchangeEquipmentList(); };
-  document.getElementById('exchange-system-filter').value = exchangeState.systemFilter;
-  document.getElementById('exchange-system-filter').onchange = (e) => {
-    exchangeState.systemFilter = e.target.value;
-    renderExchangeEquipmentList();
-  };
-  document.getElementById('exchange-type-filter').onchange = (e) => {
-    exchangeState.typeFilter = e.target.value;
-    renderExchangeEquipmentList();
-  };
-  await loadExchangeEquipments();
-}
+  document.body.appendChild(overlay);
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.querySelector('#exmodal-cancel-btn').onclick = () => overlay.remove();
 
-async function loadExchangeEquipments() {
+  const existingWrap = overlay.querySelector('#exmodal-existing-wrap');
+  const newWrap = overlay.querySelector('#exmodal-new-wrap');
+  const btnExisting = overlay.querySelector('#exmodal-mode-existing');
+  const btnNew = overlay.querySelector('#exmodal-mode-new');
+  btnExisting.onclick = () => {
+    btnExisting.classList.add('active'); btnNew.classList.remove('active');
+    existingWrap.style.display = ''; newWrap.style.display = 'none';
+  };
+  btnNew.onclick = () => {
+    btnNew.classList.add('active'); btnExisting.classList.remove('active');
+    existingWrap.style.display = 'none'; newWrap.style.display = '';
+  };
+
+  // 既存個体の選択肢を読み込み
   try {
-    exchangeState.allEquipments = await ensureEquipmentsLoaded();
-  } catch (error) {
-    document.getElementById('exchange-equipment-list').innerHTML = `<div class="msg err">読み込みエラー: ${escapeHtml(error.message)}</div>`;
-    return;
-  }
-  populateExchangeTypeFilter();
-  renderExchangeEquipmentList();
-}
-
-function populateExchangeTypeFilter() {
-  const sel = document.getElementById('exchange-type-filter');
-  if (!sel) return;
-  const types = [...new Map(exchangeState.allEquipments.map(e => [e.equipment_type_id, e.equipment_type_name])).entries()]
-    .sort((a, b) => a[1].localeCompare(b[1], 'ja'));
-  const current = exchangeState.typeFilter;
-  sel.innerHTML = '<option value="">すべて</option>' + types.map(([id, name]) =>
-    `<option value="${id}"${String(id) === String(current) ? ' selected' : ''}>${escapeHtml(name)}</option>`
-  ).join('');
-}
-
-function renderExchangeEquipmentList() {
-  const box = document.getElementById('exchange-equipment-list');
-  const countBox = document.getElementById('exchange-count');
-  if (!box) return;
-  const search = exchangeState.searchText.trim().toLowerCase();
-  const rows = exchangeState.allEquipments.filter(e => {
-    if (exchangeState.systemFilter && String(e.system_category_kbn) !== exchangeState.systemFilter) return false;
-    if (exchangeState.typeFilter && String(e.equipment_type_id) !== exchangeState.typeFilter) return false;
-    if (search) {
-      const hay = [e.equipment_name, e.location_name_from, e.location_name_to].filter(Boolean).join(' ').toLowerCase();
-      if (!hay.includes(search)) return false;
-    }
-    return true;
-  });
-  if (countBox) countBox.textContent = `${rows.length} / ${exchangeState.allEquipments.length} 件`;
-  if (!rows.length) {
-    box.innerHTML = '<div class="empty">該当する設備がありません</div>';
-    return;
-  }
-  box.innerHTML = rows.map(e => {
-    const locLabel = (e.location_name_to && e.location_name_to !== e.location_name_from)
-      ? `${escapeHtml(e.location_name_from)}～${escapeHtml(e.location_name_to)}`
-      : escapeHtml(e.location_name_from);
-    const active = e.id === exchangeState.selectedEquipmentId;
-    const scColor = SYSTEM_CATEGORY_COLORS[e.system_category_kbn] || '#C7CAD1';
-    return `<button class="ledger-eq-item${active ? ' active' : ''}" data-id="${e.id}" style="--sc-color:${scColor};">
-      <div class="eq-name">${escapeHtml(e.equipment_name)}</div>
-      <div class="eq-meta"><span class="sc-chip" style="background:${scColor};">${escapeHtml(SYSTEM_CATEGORY_LABELS[e.system_category_kbn] || '-')}</span>${escapeHtml(e.equipment_type_name)}／${locLabel}</div>
-    </button>`;
-  }).join('');
-  box.querySelectorAll('.ledger-eq-item').forEach(btn => {
-    btn.onclick = () => selectExchangeEquipment(parseInt(btn.dataset.id, 10));
-  });
-}
-
-async function selectExchangeEquipment(equipmentId) {
-  exchangeState.selectedEquipmentId = equipmentId;
-  renderExchangeEquipmentList();
-  const detail = document.getElementById('exchange-detail');
-  detail.innerHTML = '<div class="skeleton-line" style="height:22px; width:40%;"></div><div class="skeleton-line" style="margin-top:14px;"></div><div class="skeleton-line"></div><div class="skeleton-line"></div>';
-  const eq = exchangeState.allEquipments.find(e => e.id === equipmentId);
-  const [compRes, histRes] = await Promise.all([
-    sb.from('equipment_type_components').select('*').eq('equipment_type_id', eq.equipment_type_id).order('display_order', { ascending: true }).order('id', { ascending: true }),
-    sb.from('view_equipment_installation_histories').select('*').eq('equipment_id', equipmentId).order('installed_date', { ascending: true }),
-  ]);
-  if (compRes.error || histRes.error) {
-    const err = compRes.error || histRes.error;
-    detail.innerHTML = `<div class="msg err">読み込みエラー: ${escapeHtml(err.message)}</div>`;
-    return;
-  }
-  exchangeState.components = compRes.data || [];
-  exchangeState.histories = histRes.data || [];
-  renderExchangeDetail(eq);
-}
-
-function renderExchangeDetail(eq) {
-  const detail = document.getElementById('exchange-detail');
-  const histByComponent = {};
-  exchangeState.histories.forEach(h => {
-    (histByComponent[h.component_id] = histByComponent[h.component_id] || []).push(h);
-  });
-  Object.values(histByComponent).forEach(list => list.sort((a, b) => (a.installed_date < b.installed_date ? -1 : a.installed_date > b.installed_date ? 1 : 0)));
-
-  const byParent = {};
-  exchangeState.components.forEach(c => {
-    const key = c.parent_component_id || 'root';
-    (byParent[key] = byParent[key] || []).push(c);
-  });
-
-  function individualBox(rec, isCurrent) {
-    return `<div class="exchange-box ${isCurrent ? 'new' : 'old'}">
-      <div class="lbl">${isCurrent ? '現在' : '旧'}</div>
-      <div class="nm">${escapeHtml(rec.individual_name)}</div>
-      <div class="meta">${escapeHtml(rec.maker_name || '')} ${escapeHtml(rec.model_number || '')}${rec.serial_number ? '　No.' + escapeHtml(rec.serial_number) : ''}</div>
-    </div>`;
+    const individuals = await ensureIndividualsLoaded();
+    const sel = overlay.querySelector('#exmodal-individual-select');
+    sel.innerHTML = '<option value="">-- 選択 --</option>' + individuals.map(i =>
+      `<option value="${i.id}">#${i.id} ${escapeHtml(i.individual_name)}${i.maker_name ? '（' + escapeHtml(i.maker_name) + ' ' + escapeHtml(i.model_number || '') + '）' : ''}</option>`
+    ).join('');
+  } catch (e) {
+    overlay.querySelector('#exmodal-individual-select').innerHTML = '<option value="">読み込みエラー</option>';
   }
 
-  function renderComponentHistory(c, depth) {
-    const indentBase = depth * 18;
-    let html = `<div class="tree-node ${depth === 0 ? 'depth0' : 'depth-n'}" style="margin-left:${indentBase}px;"><span class="node-icon"></span>${escapeHtml(c.component_name)}${depth === 0 ? '<span style="color:#888; font-weight:400; margin-left:6px; font-size:11px;">（主装置）</span>' : ''}</div>`;
-    const list = histByComponent[c.id] || [];
-    if (!list.length) {
-      html += `<div class="empty" style="margin-left:${indentBase + 16}px; padding:4px 0;">設置履歴がありません</div>`;
+  // 新規個体登録フォーム（individualsテーブルの項目定義を再利用して動的生成）
+  const newFields = TABLE_MAP['individuals'].fields;
+  for (const f of newFields) {
+    const div = document.createElement('div');
+    div.className = 'field';
+    const lab = document.createElement('label');
+    lab.textContent = f.label + (f.required ? ' *' : '');
+    div.appendChild(lab);
+    let input;
+    if (f.kind === 'fk') {
+      input = document.createElement('select');
+      let opts = [];
+      try { opts = await loadFkOptions(f.refTable); } catch (e) { console.error(e); }
+      input.innerHTML = '<option value="">-- 選択 --</option>' + opts.map(r => `<option value="${r.id}">#${r.id} ${escapeHtml(r.lbl)}</option>`).join('');
+    } else if (f.kind === 'date') {
+      input = document.createElement('input'); input.type = 'date';
     } else {
-      const first = list[0];
-      html += `<div class="exchange-initial" style="margin-left:${indentBase + 16}px;">
-        <div class="lbl">初回設置${!first.removed_date ? '（現在設置中）' : ''}</div>
-        <div class="nm">${escapeHtml(first.individual_name)}</div>
-        <div class="meta">${escapeHtml(first.installed_date)} 設置${first.removed_date ? '　〜　' + escapeHtml(first.removed_date) + ' 撤去' : ''}</div>
-      </div>`;
-      for (let i = 1; i < list.length; i++) {
-        const prev = list[i - 1];
-        const curr = list[i];
-        const isCurrent = !curr.removed_date;
-        html += `<div class="exchange-card" style="margin-left:${indentBase + 16}px;">
-          <div class="exchange-date">${escapeHtml(curr.installed_date)} に交換${isCurrent ? ' <span class="badge now">現在設置中</span>' : ''}</div>
-          <div class="exchange-row">
-            ${individualBox(prev, false)}
-            <span class="exchange-arrow">→</span>
-            ${individualBox(curr, true)}
-          </div>
-          ${curr.note ? `<div class="exchange-note">${escapeHtml(curr.note)}</div>` : ''}
-        </div>`;
-      }
+      input = document.createElement('input'); input.type = 'text';
     }
-    (byParent[c.id] || []).forEach(ch => { html += renderComponentHistory(ch, depth + 1); });
-    return html;
+    input.id = 'exnew_' + f.col;
+    div.appendChild(input);
+    newWrap.appendChild(div);
   }
 
-  const roots = byParent['root'] || [];
-  const scColor = SYSTEM_CATEGORY_COLORS[eq.system_category_kbn] || '#C7CAD1';
-  const locLabel = eq.location_name_to && eq.location_name_to !== eq.location_name_from
-    ? `${escapeHtml(eq.location_name_from)}～${escapeHtml(eq.location_name_to)}` : escapeHtml(eq.location_name_from);
-  let html = `<div class="ledger-detail-head">
-    <div>
-      <div class="eq-title">${escapeHtml(eq.equipment_name)}</div>
-      <div class="eq-tags">
-        <span class="sc-chip" style="background:${scColor};">${escapeHtml(SYSTEM_CATEGORY_LABELS[eq.system_category_kbn] || '-')}</span>
-        <span class="tag">${escapeHtml(eq.equipment_type_name)}</span>
-        <span class="tag">${locLabel}</span>
-      </div>
-    </div>
-  </div>`;
-  html += '<div class="ledger-tree">';
-  html += roots.length ? roots.map(r => renderComponentHistory(r, 0)).join('') : '<div class="empty">構成要素が登録されていません</div>';
-  html += '</div>';
-  detail.innerHTML = html;
+  overlay.querySelector('#exmodal-submit-btn').onclick = () => submitExchange(overlay, eq, component, currentRec);
+}
+
+async function submitExchange(overlay, eq, component, currentRec) {
+  const msgBox = overlay.querySelector('#exmodal-msgbox');
+  msgBox.innerHTML = '';
+  const isNewMode = overlay.querySelector('#exmodal-mode-new').classList.contains('active');
+  const dateVal = overlay.querySelector('#exmodal-date').value;
+  const noteVal = overlay.querySelector('#exmodal-note').value;
+
+  if (!dateVal) {
+    msgBox.innerHTML = '<div class="msg err">日付は必須です</div>';
+    return;
+  }
+  if (currentRec && dateVal <= currentRec.installed_date) {
+    msgBox.innerHTML = '<div class="msg err">交換日は、現在設置中の個体の設置日より後の日付にしてください</div>';
+    return;
+  }
+
+  let individualId = null;
+  if (isNewMode) {
+    const payload = {};
+    for (const f of TABLE_MAP['individuals'].fields) {
+      const el = overlay.querySelector('#exnew_' + f.col);
+      const v = el ? el.value : '';
+      if (f.required && !v) {
+        msgBox.innerHTML = `<div class="msg err">「${escapeHtml(f.label)}」は必須です</div>`;
+        return;
+      }
+      payload[f.col] = castVal(v, f.kind);
+    }
+    const { data, error } = await sb.from('individuals').insert(payload).select('id').single();
+    if (error) {
+      msgBox.innerHTML = `<div class="msg err">個体の登録に失敗しました: ${escapeHtml(error.message)}</div>`;
+      return;
+    }
+    individualId = data.id;
+    individualsCache = null;
+  } else {
+    const sel = overlay.querySelector('#exmodal-individual-select');
+    if (!sel.value) {
+      msgBox.innerHTML = '<div class="msg err">個体を選択してください</div>';
+      return;
+    }
+    individualId = parseInt(sel.value, 10);
+  }
+
+  if (currentRec) {
+    const { error } = await sb.from('individual_installation_histories')
+      .update({ removed_date: dateVal })
+      .eq('id', currentRec.history_id);
+    if (error) {
+      msgBox.innerHTML = `<div class="msg err">既存履歴の更新に失敗しました: ${escapeHtml(error.message)}</div>`;
+      return;
+    }
+  }
+
+  const { error: insError } = await sb.from('individual_installation_histories').insert({
+    individual_id: individualId,
+    equipment_id: eq.id,
+    component_id: component.id,
+    installed_date: dateVal,
+    note: noteVal || null,
+  });
+  if (insError) {
+    msgBox.innerHTML = `<div class="msg err">登録に失敗しました: ${escapeHtml(insError.message)}</div>`;
+    return;
+  }
+
+  overlay.remove();
+  showMsg(currentRec ? '個体を交換しました' : '個体を設置しました');
+  await selectLedgerEquipment(eq.id);
 }
 </script>
 </body>
