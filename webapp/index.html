@@ -241,17 +241,7 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // ================= テーブル定義（アーティファクト版と同じ構成） =================
 const TABLES = [
   {
-    key: 'equipment_types', label: '設備種別', group: 'マスタ',
-    desc: '設備の"クラス"を定義するマスタ（転てつ機、踏切など）',
-    labelCol: 'equipment_type_name', orderCol: 'id',
-    fields: [
-      { col: 'equipment_type_name', label: '設備種別名称', kind: 'text', required: true },
-      { col: 'system_category_kbn', label: '系統区分', kind: 'select', options: [[1,'施設'],[2,'保線'],[3,'機械'],[4,'電力'],[5,'信通']], required: true },
-      { col: 'equipment_form_kbn', label: '設備形態区分', kind: 'select', options: [[1,'箱もの'],[2,'線もの']], required: true },
-    ],
-  },
-  {
-    key: 'locations', label: '場所', group: 'マスタ',
+    key: 'locations', label: '場所', group: '設備系マスタメンテナンス',
     desc: '駅・機器室・キロ程・支持物などの場所マスタ',
     labelCol: 'location_name', orderCol: 'id',
     fields: [
@@ -263,15 +253,28 @@ const TABLES = [
     ],
   },
   {
-    key: 'product_categories', label: '製品種別', group: 'マスタ',
-    desc: '個体の属性スキーマを決めるための製品分類（リレー、遮断機本体等）',
-    labelCol: 'product_category_name', orderCol: 'id',
+    key: 'equipment_types', label: '設備種別', group: '設備系マスタメンテナンス',
+    desc: '設備の"クラス"を定義するマスタ（転てつ機、踏切など）',
+    labelCol: 'equipment_type_name', orderCol: 'id',
     fields: [
-      { col: 'product_category_name', label: '製品種別名称', kind: 'text', required: true },
+      { col: 'equipment_type_name', label: '設備種別名称', kind: 'text', required: true },
+      { col: 'system_category_kbn', label: '系統区分', kind: 'select', options: [[1,'施設'],[2,'保線'],[3,'機械'],[4,'電力'],[5,'信通']], required: true },
+      { col: 'equipment_form_kbn', label: '設備形態区分', kind: 'select', options: [[1,'箱もの'],[2,'線もの']], required: true },
     ],
   },
   {
-    key: 'equipments', label: '設備', group: '設備台帳',
+    key: 'equipment_type_components', label: '構成要素', group: '設備系マスタメンテナンス',
+    desc: '設備種別を構成する主装置・付属部品（階層構造・自己参照）',
+    labelCol: 'component_name', orderCol: 'id',
+    fields: [
+      { col: 'equipment_type_id', label: '設備種別', kind: 'fk', refTable: 'equipment_types', required: true },
+      { col: 'parent_component_id', label: '親構成要素（付属部品の場合）', kind: 'fk', refTable: 'equipment_type_components', required: false },
+      { col: 'component_name', label: '構成要素名称', kind: 'text', required: true },
+      { col: 'display_order', label: '表示順', kind: 'int', required: false },
+    ],
+  },
+  {
+    key: 'equipments', label: '設備', group: '設備系マスタメンテナンス',
     desc: '設備種別×場所の組み合わせで決まるインスタンス',
     labelCol: 'equipment_name', orderCol: 'id',
     fields: [
@@ -284,18 +287,15 @@ const TABLES = [
     ],
   },
   {
-    key: 'equipment_type_components', label: '構成要素', group: 'マスタ',
-    desc: '設備種別を構成する主装置・付属部品（階層構造・自己参照）',
-    labelCol: 'component_name', orderCol: 'id',
+    key: 'product_categories', label: '製品種別', group: '製品系マスタメンテナンス',
+    desc: '個体の属性スキーマを決めるための製品分類（リレー、遮断機本体等）',
+    labelCol: 'product_category_name', orderCol: 'id',
     fields: [
-      { col: 'equipment_type_id', label: '設備種別', kind: 'fk', refTable: 'equipment_types', required: true },
-      { col: 'parent_component_id', label: '親構成要素（付属部品の場合）', kind: 'fk', refTable: 'equipment_type_components', required: false },
-      { col: 'component_name', label: '構成要素名称', kind: 'text', required: true },
-      { col: 'display_order', label: '表示順', kind: 'int', required: false },
+      { col: 'product_category_name', label: '製品種別名称', kind: 'text', required: true },
     ],
   },
   {
-    key: 'attribute_definitions', label: '属性定義', group: 'マスタ',
+    key: 'attribute_definitions', label: '属性定義', group: '製品系マスタメンテナンス',
     desc: '製品種別ごとに管理項目（属性）を定義するマスタ',
     labelCol: 'attribute_name', orderCol: 'id',
     fields: [
@@ -307,7 +307,7 @@ const TABLES = [
     ],
   },
   {
-    key: 'individuals', label: '個体', group: '設備台帳',
+    key: 'individuals', label: '個体', group: '製品系マスタメンテナンス',
     desc: '主装置・付属部品として現地に設置される物理製品（メーカー・型式・製造番号）',
     labelCol: 'individual_name', orderCol: 'id',
     fields: [
@@ -321,7 +321,7 @@ const TABLES = [
     ],
   },
   {
-    key: 'individual_attribute_values', label: '個体属性値', group: '設備台帳',
+    key: 'individual_attribute_values', label: '個体属性値', group: '製品系マスタメンテナンス',
     desc: '個体ごとに可変な管理項目の値（EAV方式）',
     labelCol: null, orderCol: 'individual_id',
     compositeKey: ['individual_id', 'attribute_definition_id'],
@@ -332,7 +332,7 @@ const TABLES = [
     ],
   },
   {
-    key: 'individual_installation_histories', label: '個体設置履歴', group: '設備台帳',
+    key: 'individual_installation_histories', label: '個体設置履歴', group: '製品系マスタメンテナンス',
     desc: '個体がどの設備・構成要素スロットにいつ設置されていたかの履歴（要件④）',
     labelCol: null, orderCol: 'id',
     fields: [
@@ -349,9 +349,9 @@ const TABLE_MAP = Object.fromEntries(TABLES.map(t => [t.key, t]));
 
 // ================= 台帳確認画面（テーブルをまたいだ表示） =================
 const SPECIAL_VIEWS = [
-  { key: 'ledger_view', label: '台帳確認', group: '台帳確認' },
-  { key: 'product_view', label: '製品確認', group: '台帳確認' },
-  { key: 'equipment_type_view', label: '設備種別確認', group: '台帳確認' },
+  { key: 'ledger_view', label: '台帳確認', group: '業務メニュー' },
+  { key: 'product_view', label: '製品確認', group: '業務メニュー' },
+  { key: 'equipment_type_view', label: '設備種別確認', group: '業務メニュー' },
 ];
 const SYSTEM_CATEGORY_LABELS = { 1: '施設', 2: '保線', 3: '機械', 4: '電力', 5: '信通' };
 const SYSTEM_CATEGORY_COLORS = { 1: '#3E7CB1', 2: '#4C9F70', 3: '#B98A3B', 4: '#B85042', 5: '#6E5AA6' };
