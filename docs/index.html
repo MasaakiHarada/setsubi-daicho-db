@@ -751,9 +751,10 @@ async function renderLedgerView() {
           </div>
         </div>
         <div class="ledger-count" id="ledger-count"></div>
-        <div style="display:flex; gap:6px; margin-bottom:10px;">
-          <button class="btn ghost small" id="export-equipments-btn" style="flex:1;">設備一覧 出力</button>
-          <button class="btn ghost small" id="export-individuals-btn" style="flex:1;">個体設置明細 出力</button>
+        <div style="display:flex; flex-direction:column; gap:6px; margin-bottom:10px;">
+          <button class="btn ghost small" id="export-equipments-btn">設備一覧 出力</button>
+          <button class="btn ghost small" id="export-individuals-btn">個体設置明細 出力</button>
+          <button class="btn ghost small" id="export-individual-attrs-btn">個体属性値一覧 出力</button>
         </div>
         <div id="ledger-equipment-list" class="ledger-eq-list">
           <div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div>
@@ -778,6 +779,7 @@ async function renderLedgerView() {
   };
   document.getElementById('export-equipments-btn').onclick = () => exportEquipmentsToExcel();
   document.getElementById('export-individuals-btn').onclick = () => exportIndividualDetailToExcel();
+  document.getElementById('export-individual-attrs-btn').onclick = () => exportIndividualAttributesToExcel();
   await loadLedgerEquipments();
 }
 
@@ -925,6 +927,135 @@ async function exportIndividualDetailToExcel() {
   showMsg(`個体設置明細を出力しました（${rowsOut.length}行 / ${rows.length}設備）`);
 }
 
+// 個体属性値一覧（縦持ち）: 現在の絞り込み条件に一致する設備に、現在設置されている個体の属性値をすべて出力する
+async function exportIndividualAttributesToExcel() {
+  const rows = getFilteredLedgerEquipments();
+  if (!rows.length) {
+    showMsg('対象の設備がありません（絞り込み条件を確認してください）', true);
+    return;
+  }
+  const equipmentIds = rows.map(e => e.id);
+  const { data: curInd, error: curErr } = await sb.from('view_equipment_current_individuals').select('*').in('equipment_id', equipmentIds);
+  if (curErr) {
+    showMsg('個体の取得に失敗しました: ' + curErr.message, true);
+    return;
+  }
+  if (!curInd || !curInd.length) {
+    showMsg('対象設備に現在設置されている個体がありません', true);
+    return;
+  }
+  const individualIds = [...new Set(curInd.map(r => r.individual_id))];
+  const { data: attrs, error: attrErr } = await sb.from('view_individual_attributes').select('*')
+    .in('individual_id', individualIds)
+    .order('individual_id', { ascending: true })
+    .order('display_order', { ascending: true });
+  if (attrErr) {
+    showMsg('属性値の取得に失敗しました: ' + attrErr.message, true);
+    return;
+  }
+  if (!attrs || !attrs.length) {
+    showMsg('対象個体に属性値の登録がありません', true);
+    return;
+  }
+  const indInfoMap = new Map(curInd.map(r => [r.individual_id, r]));
+  const header = ['個体ID', '個体名称', '製品種別', 'メーカー', '型式', '製造番号', '属性名', '属性値', '単位'];
+  const rowsOut = attrs.map(a => {
+    const info = indInfoMap.get(a.individual_id) || {};
+    return [
+      a.individual_id,
+      info.individual_name || '',
+      info.product_category_name || '',
+      info.maker_name || '',
+      info.model_number || '',
+      info.serial_number || '',
+      a.attribute_name,
+      a.attribute_value,
+      a.unit || '',
+    ];
+  });
+  const ws = XLSX.utils.aoa_to_sheet([header, ...rowsOut]);
+  ws['!cols'] = [{ wch: 8 }, { wch: 22 }, { wch: 20 }, { wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 8 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '個体属性値一覧');
+  XLSX.writeFile(wb, `個体属性値一覧_${todayStr()}.xlsx`);
+  showMsg(`個体属性値一覧を出力しました（${rowsOut.length}行 / ${individualIds.length}個体）`);
+}
+
+// 設備個体属性値（横持ち）: 選択中の設備1台に現在設置されている個体を対象に、製品種別ごとに属性を列展開して出力する
+// （製品種別ごとに属性定義が異なるため、製品種別ごとにシートを分ける）
+async function exportEquipmentIndividualAttributesWide(eq) {
+  const { data: curInd, error: curErr } = await sb.from('view_equipment_current_individuals').select('*')
+    .eq('equipment_id', eq.id)
+    .order('component_id', { ascending: true });
+  if (curErr) {
+    showMsg('個体の取得に失敗しました: ' + curErr.message, true);
+    return;
+  }
+  if (!curInd || !curInd.length) {
+    showMsg('この設備に現在設置されている個体がありません', true);
+    return;
+  }
+  const individualIds = curInd.map(r => r.individual_id);
+  const { data: attrs, error: attrErr } = await sb.from('view_individual_attributes').select('*')
+    .in('individual_id', individualIds)
+    .order('display_order', { ascending: true });
+  if (attrErr) {
+    showMsg('属性値の取得に失敗しました: ' + attrErr.message, true);
+    return;
+  }
+
+  const byCategory = new Map();
+  curInd.forEach(r => {
+    if (!byCategory.has(r.product_category_name)) byCategory.set(r.product_category_name, []);
+    byCategory.get(r.product_category_name).push(r);
+  });
+  const attrsByIndividual = new Map();
+  (attrs || []).forEach(a => {
+    if (!attrsByIndividual.has(a.individual_id)) attrsByIndividual.set(a.individual_id, []);
+    attrsByIndividual.get(a.individual_id).push(a);
+  });
+
+  const wb = XLSX.utils.book_new();
+  let sheetCount = 0;
+  byCategory.forEach((individuals, categoryName) => {
+    // この製品種別の個体が実際に持つ属性名を、登場順（display_order基準）でまとめる
+    const attrNameOrder = [];
+    individuals.forEach(ind => {
+      (attrsByIndividual.get(ind.individual_id) || []).forEach(a => {
+        if (!attrNameOrder.includes(a.attribute_name)) attrNameOrder.push(a.attribute_name);
+      });
+    });
+    const header = ['個体ID', '個体名称', '構成要素名', 'メーカー', '型式', '製造番号', ...attrNameOrder];
+    const rowsOut = individuals.map(ind => {
+      const attrMap = new Map((attrsByIndividual.get(ind.individual_id) || []).map(a => [a.attribute_name, a.attribute_value]));
+      return [
+        ind.individual_id,
+        ind.individual_name,
+        ind.component_name,
+        ind.maker_name || '',
+        ind.model_number || '',
+        ind.serial_number || '',
+        ...attrNameOrder.map(name => attrMap.get(name) || ''),
+      ];
+    });
+    const ws = XLSX.utils.aoa_to_sheet([header, ...rowsOut]);
+    ws['!cols'] = [{ wch: 8 }, { wch: 20 }, { wch: 16 }, { wch: 12 }, { wch: 14 }, { wch: 16 }, ...attrNameOrder.map(() => ({ wch: 12 }))];
+    let sheetName = (categoryName || `シート${sheetCount + 1}`).replace(/[\\\/\?\*\[\]:]/g, '_').slice(0, 31);
+    while (wb.SheetNames.includes(sheetName)) {
+      sheetName = (sheetName + '_2').slice(0, 31);
+    }
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    sheetCount++;
+  });
+
+  if (!sheetCount) {
+    showMsg('出力対象の属性値がありません', true);
+    return;
+  }
+  XLSX.writeFile(wb, `${eq.equipment_name}_個体属性値_${todayStr()}.xlsx`);
+  showMsg(`${eq.equipment_name}の個体属性値を出力しました（${sheetCount}シート）`);
+}
+
 async function selectLedgerEquipment(equipmentId) {
   ledgerState.selectedEquipmentId = equipmentId;
   ledgerState.selectedIndividualId = null;
@@ -1024,6 +1155,7 @@ function renderLedgerDetail(eq) {
         <span class="tag">${locLabel}</span>
       </div>
     </div>
+    <button class="btn ghost small" id="export-eq-individual-attrs-btn">個体属性値を出力（横持ち）</button>
   </div>`;
   html += '<div class="ledger-tree">';
   html += roots.length ? roots.map(r => renderComponentBlock(r, 0)).join('') : '<div class="empty">構成要素が登録されていません</div>';
@@ -1042,6 +1174,7 @@ function renderLedgerDetail(eq) {
       openExchangeModal(eq, component, currentRec);
     };
   });
+  document.getElementById('export-eq-individual-attrs-btn').onclick = () => exportEquipmentIndividualAttributesWide(eq);
 }
 
 // 個体をクリックすると、画面のスクロール位置を変えずにモーダルで詳細（属性値・全設置履歴）を表示する
