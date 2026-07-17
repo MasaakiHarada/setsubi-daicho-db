@@ -942,10 +942,10 @@ function renderLedgerDetail(eq) {
       </div>
     </div>
   </div>`;
+  html += '<div id="ledger-individual-detail"></div>';
   html += '<div class="ledger-tree">';
   html += roots.length ? roots.map(r => renderComponentBlock(r, 0)).join('') : '<div class="empty">構成要素が登録されていません</div>';
   html += '</div>';
-  html += '<div id="ledger-individual-detail" style="margin-top:14px; border-top:1px solid #EEE; padding-top:10px;"></div>';
   detail.innerHTML = html;
 
   detail.querySelectorAll('[data-individual-id]').forEach(el => {
@@ -970,6 +970,8 @@ async function selectLedgerIndividual(individualId) {
   const eq = ledgerState.allEquipments.find(e => e.id === ledgerState.selectedEquipmentId);
   renderLedgerDetail(eq);
   await renderLedgerIndividualDetail();
+  const box = document.getElementById('ledger-individual-detail');
+  if (box) box.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 async function renderLedgerIndividualDetail() {
@@ -991,7 +993,8 @@ async function renderLedgerIndividualDetail() {
   const indRow = ledgerState.histories.find(r => r.individual_id === individualId && !r.removed_date)
     || ledgerState.histories.find(r => r.individual_id === individualId);
   const nameLabel = indRow ? escapeHtml(indRow.individual_name) : `ID: ${individualId}`;
-  let html = `<p style="font-size:12px; color:#666; margin:0 0 8px; font-weight:600;">個体詳細（${nameLabel}）</p>`;
+  let html = '<div style="border:1px solid #E4E6EA; border-radius:8px; padding:12px 14px; margin-bottom:16px; background:#FAFBFC;">';
+  html += `<p style="font-size:12px; color:#666; margin:0 0 8px; font-weight:600;">個体詳細（${nameLabel}）</p>`;
   if (attrs.length) {
     html += '<div class="attr-grid">';
     attrs.forEach(a => {
@@ -1013,6 +1016,7 @@ async function renderLedgerIndividualDetail() {
   } else {
     html += '<div class="empty">履歴がありません</div>';
   }
+  html += '</div>';
   box.innerHTML = html;
 }
 
