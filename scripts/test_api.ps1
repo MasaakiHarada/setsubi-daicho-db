@@ -14,13 +14,20 @@
 
 param(
     [string]$ApiKey = "",
-    [string]$BaseUrl = "https://nbahkykcxlulzkafrmkf.supabase.co/functions/v1"
+    [string]$BaseUrl = "https://nbahkykcxlulzkafrmkf.supabase.co/functions/v1",
+    [string]$OutDir = ""
 )
 
 try {
     [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
     $OutputEncoding = [System.Text.Encoding]::UTF8
 } catch {}
+
+$script:TestIndex = 0
+if ($OutDir) {
+    New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
+    Write-Host "レスポンスの保存先: $OutDir" -ForegroundColor Yellow
+}
 
 function Build-Url {
     param(
@@ -50,6 +57,7 @@ function Invoke-Api {
     )
 
     $url = Build-Url -BaseUrl $BaseUrl -Path $Path -Query $Query
+    $script:TestIndex++
 
     Write-Host ""
     Write-Host "=== $Name ===" -ForegroundColor Cyan
@@ -63,7 +71,15 @@ function Invoke-Api {
         Write-Host "Status: $($resp.StatusCode)" -ForegroundColor Green
         $bytes = $resp.RawContentStream.ToArray()
         $text = [System.Text.Encoding]::UTF8.GetString($bytes)
-        $text | ConvertFrom-Json | ConvertTo-Json -Depth 10
+        $pretty = $text | ConvertFrom-Json | ConvertTo-Json -Depth 10
+        $pretty
+
+        if ($OutDir) {
+            $safeName = ($Name -replace '[\\/:\*\?"<>\|]', '_')
+            $file = Join-Path $OutDir ("{0:D2}_{1}.json" -f $script:TestIndex, $safeName)
+            [System.IO.File]::WriteAllText($file, $pretty, [System.Text.Encoding]::UTF8)
+            Write-Host "-> 保存: $file" -ForegroundColor DarkGray
+        }
     } catch {
         $ex = $_.Exception
         $statusCode = $null
