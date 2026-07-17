@@ -28,6 +28,7 @@ Excelファイル出力機能（台帳確認画面）の内容を、外部シス
 | 2 | 個体設置明細出力API | `GET /export-individual-installations` | 同上 |
 | 3 | 個体属性値一覧出力API（縦持ち） | `GET /export-individual-attributes` | 同上 |
 | 4 | 設備個体属性値出力API（横持ち） | `GET /export-equipment-individual-attributes` | `equipment_id`（必須） |
+| 5 | 撤去済み個体一覧出力API | `GET /export-removed-individuals` | `search` / `system_category_kbn` / `equipment_type_id`（すべて任意） |
 
 各APIの詳細なレスポンス項目は、実装（`supabase/functions/*/index.ts`）およびソースコード先頭のコメントを参照。
 

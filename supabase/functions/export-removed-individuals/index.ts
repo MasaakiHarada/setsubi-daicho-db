@@ -1,6 +1,7 @@
-// API3: 個体属性値一覧出力API（縦持ち）
-// GET /functions/v1/export-individual-attributes?search=&system_category_kbn=&equipment_type_id=
-// 設備側の絞り込み（API1と同じ条件）に一致する設備に、現在設置されている個体の属性値をすべて返す。
+// API5: 撤去済み個体一覧出力API
+// GET /functions/v1/export-removed-individuals?search=&system_category_kbn=&equipment_type_id=
+// 設備側の絞り込み（API1と同じ条件）に一致する設備について、過去に撤去された（removed_dateが設定された）
+// 個体設置履歴をすべて返す（現在設置中のものは対象外。API2・API3の「現在設置中」の逆にあたる）。
 // 認証: リクエストヘッダー X-API-Key に、Secretsに設定したEXTERNAL_API_KEYと一致する値が必要。
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -27,6 +28,8 @@ function checkApiKey(req: Request): boolean {
   const expected = Deno.env.get("EXTERNAL_API_KEY");
   return !!expected && key === expected;
 }
+
+const SYSTEM_CATEGORY_LABELS: Record<number, string> = { 1: "施設", 2: "保線", 3: "機械", 4: "電力", 5: "信通" };
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -57,6 +60,7 @@ Deno.serve(async (req: Request) => {
       return errorResponse("equipment_type_idは整数で指定してください", 400);
     }
 
+    // 設備側の絞り込み（API1と同じ条件）
     let eqQuery = supabase.from("view_equipments_list").select("*");
     if (systemCategoryKbnParam !== null) eqQuery = eqQuery.eq("system_category_kbn", Number(systemCategoryKbnParam));
     if (equipmentTypeIdParam !== null) eqQuery = eqQuery.eq("equipment_type_id", Number(equipmentTypeIdParam));
@@ -76,40 +80,38 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ generated_at: new Date().toISOString(), count: 0, items: [] });
     }
 
+    const equipmentInfoMap = new Map(equipments.map((e: any) => [e.id, e]));
     const equipmentIds = equipments.map((e: any) => e.id);
-    const { data: curInd, error: curErr } = await supabase
-      .from("view_equipment_current_individuals")
+
+    // 撤去済み（removed_dateが設定されている）履歴のみを対象とする
+    const { data: histories, error: histErr } = await supabase
+      .from("view_equipment_installation_histories")
       .select("*")
-      .in("equipment_id", equipmentIds);
-    if (curErr) return errorResponse(curErr.message, 500);
+      .in("equipment_id", equipmentIds)
+      .not("removed_date", "is", null)
+      .order("removed_date", { ascending: false });
+    if (histErr) return errorResponse(histErr.message, 500);
 
-    if (!curInd || !curInd.length) {
-      return jsonResponse({ generated_at: new Date().toISOString(), count: 0, items: [] });
-    }
-
-    const individualIds = [...new Set(curInd.map((r: any) => r.individual_id))];
-    const indInfoMap = new Map(curInd.map((r: any) => [r.individual_id, r]));
-
-    const { data: attrs, error: attrErr } = await supabase
-      .from("view_individual_attributes")
-      .select("*")
-      .in("individual_id", individualIds)
-      .order("individual_id", { ascending: true })
-      .order("display_order", { ascending: true });
-    if (attrErr) return errorResponse(attrErr.message, 500);
-
-    const items = (attrs || []).map((a: any) => {
-      const info: any = indInfoMap.get(a.individual_id) || {};
+    const items = (histories || []).map((h: any) => {
+      const eq: any = equipmentInfoMap.get(h.equipment_id) || {};
       return {
-        individual_id: a.individual_id,
-        individual_name: info.individual_name ?? null,
-        product_category_name: info.product_category_name ?? null,
-        maker_name: info.maker_name ?? null,
-        model_number: info.model_number ?? null,
-        serial_number: info.serial_number ?? null,
-        attribute_name: a.attribute_name,
-        attribute_value: a.attribute_value,
-        unit: a.unit,
+        history_id: h.history_id,
+        individual_id: h.individual_id,
+        individual_name: h.individual_name,
+        maker_name: h.maker_name,
+        model_number: h.model_number,
+        serial_number: h.serial_number,
+        equipment_id: h.equipment_id,
+        equipment_name: eq.equipment_name ?? null,
+        equipment_type_id: eq.equipment_type_id ?? null,
+        equipment_type_name: eq.equipment_type_name ?? null,
+        system_category_kbn: eq.system_category_kbn ?? null,
+        system_category_name: eq.system_category_kbn != null ? SYSTEM_CATEGORY_LABELS[eq.system_category_kbn] ?? null : null,
+        component_id: h.component_id,
+        component_name: h.component_name,
+        installed_date: h.installed_date,
+        removed_date: h.removed_date,
+        note: h.note,
       };
     });
 

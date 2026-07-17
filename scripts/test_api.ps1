@@ -118,6 +118,7 @@ $tests = @(
     @{ Name = "API2: 個体設置明細出力API"; Path = "export-individual-installations"; Query = @{} },
     @{ Name = "API3: 個体属性値一覧出力API（縦持ち）"; Path = "export-individual-attributes"; Query = @{} },
     @{ Name = "API4: 設備個体属性値出力API（横持ち・equipment_id=1）"; Path = "export-equipment-individual-attributes"; Query = @{ equipment_id = "1" } },
+    @{ Name = "API5: 撤去済み個体一覧出力API"; Path = "export-removed-individuals"; Query = @{} },
     @{ Name = "異常系: APIキー未指定 -> 401想定"; Path = "export-equipments"; Query = @{}; OmitKey = $true },
     @{ Name = "異常系: APIキー不正値 -> 401想定"; Path = "export-equipments"; Query = @{}; Key = "invalid-key" },
     @{ Name = "異常系: system_category_kbnが範囲外(9) -> 400想定"; Path = "export-equipments"; Query = @{ system_category_kbn = "9" } },
