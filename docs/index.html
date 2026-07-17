@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <title>設備台帳管理システム（デモ）</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
   * { box-sizing: border-box; }
   body {
@@ -750,6 +751,10 @@ async function renderLedgerView() {
           </div>
         </div>
         <div class="ledger-count" id="ledger-count"></div>
+        <div style="display:flex; gap:6px; margin-bottom:10px;">
+          <button class="btn ghost small" id="export-equipments-btn" style="flex:1;">設備一覧 出力</button>
+          <button class="btn ghost small" id="export-individuals-btn" style="flex:1;">個体設置明細 出力</button>
+        </div>
         <div id="ledger-equipment-list" class="ledger-eq-list">
           <div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div>
         </div>
@@ -771,6 +776,8 @@ async function renderLedgerView() {
     ledgerState.typeFilter = e.target.value;
     renderLedgerEquipmentList();
   };
+  document.getElementById('export-equipments-btn').onclick = () => exportEquipmentsToExcel();
+  document.getElementById('export-individuals-btn').onclick = () => exportIndividualDetailToExcel();
   await loadLedgerEquipments();
 }
 
@@ -807,12 +814,10 @@ function populateLedgerTypeFilter() {
   ).join('');
 }
 
-function renderLedgerEquipmentList() {
-  const box = document.getElementById('ledger-equipment-list');
-  const countBox = document.getElementById('ledger-count');
-  if (!box) return;
+// 検索・系統・設備種別の絞り込みは、一覧表示とExcel出力（設備一覧・個体設置明細）の両方で共有する
+function getFilteredLedgerEquipments() {
   const search = ledgerState.searchText.trim().toLowerCase();
-  const rows = ledgerState.allEquipments.filter(e => {
+  return ledgerState.allEquipments.filter(e => {
     if (ledgerState.systemFilter && String(e.system_category_kbn) !== ledgerState.systemFilter) return false;
     if (ledgerState.typeFilter && String(e.equipment_type_id) !== ledgerState.typeFilter) return false;
     if (search) {
@@ -821,6 +826,13 @@ function renderLedgerEquipmentList() {
     }
     return true;
   });
+}
+
+function renderLedgerEquipmentList() {
+  const box = document.getElementById('ledger-equipment-list');
+  const countBox = document.getElementById('ledger-count');
+  if (!box) return;
+  const rows = getFilteredLedgerEquipments();
   if (countBox) countBox.textContent = `${rows.length} / ${ledgerState.allEquipments.length} 件`;
   if (!rows.length) {
     box.innerHTML = '<div class="empty">該当する設備がありません</div>';
@@ -840,6 +852,77 @@ function renderLedgerEquipmentList() {
   box.querySelectorAll('.ledger-eq-item').forEach(btn => {
     btn.onclick = () => selectLedgerEquipment(parseInt(btn.dataset.id, 10));
   });
+}
+
+// ================= Excel出力（現在の絞り込み条件に一致する設備が対象） =================
+function todayStr() {
+  return new Date().toISOString().slice(0, 10).replace(/-/g, '');
+}
+
+function exportEquipmentsToExcel() {
+  const rows = getFilteredLedgerEquipments();
+  if (!rows.length) {
+    showMsg('対象の設備がありません（絞り込み条件を確認してください）', true);
+    return;
+  }
+  const header = ['設備ID', '設備名称', '設備種別', '系統', '設備形態', '場所(自)', '場所(至)', '取付日', '備考'];
+  const data = rows.map(e => [
+    e.id,
+    e.equipment_name,
+    e.equipment_type_name,
+    SYSTEM_CATEGORY_LABELS[e.system_category_kbn] || '',
+    e.equipment_form_kbn === 2 ? '線もの' : '箱もの',
+    e.location_name_from || '',
+    e.location_name_to || '',
+    e.install_date || '',
+    e.note || '',
+  ]);
+  const ws = XLSX.utils.aoa_to_sheet([header, ...data]);
+  ws['!cols'] = [{ wch: 8 }, { wch: 22 }, { wch: 16 }, { wch: 8 }, { wch: 10 }, { wch: 16 }, { wch: 16 }, { wch: 12 }, { wch: 22 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '設備一覧');
+  XLSX.writeFile(wb, `設備一覧_${todayStr()}.xlsx`);
+  showMsg(`設備一覧を出力しました（${rows.length}件）`);
+}
+
+async function exportIndividualDetailToExcel() {
+  const rows = getFilteredLedgerEquipments();
+  if (!rows.length) {
+    showMsg('対象の設備がありません（絞り込み条件を確認してください）', true);
+    return;
+  }
+  const equipmentIds = rows.map(e => e.id);
+  const { data, error } = await sb.from('view_equipment_current_individuals').select('*')
+    .in('equipment_id', equipmentIds)
+    .order('equipment_id', { ascending: true })
+    .order('component_id', { ascending: true });
+  if (error) {
+    showMsg('個体設置明細の取得に失敗しました: ' + error.message, true);
+    return;
+  }
+  if (!data || !data.length) {
+    showMsg('対象設備に現在設置されている個体がありません', true);
+    return;
+  }
+  const eqNameMap = new Map(ledgerState.allEquipments.map(e => [e.id, e.equipment_name]));
+  const header = ['設備ID', '設備名称', '構成要素名', '個体名称', '製品種別', 'メーカー', '型式', '製造番号', '設置日'];
+  const rowsOut = data.map(r => [
+    r.equipment_id,
+    eqNameMap.get(r.equipment_id) || '',
+    r.component_name,
+    r.individual_name,
+    r.product_category_name,
+    r.maker_name || '',
+    r.model_number || '',
+    r.serial_number || '',
+    r.installed_date || '',
+  ]);
+  const ws = XLSX.utils.aoa_to_sheet([header, ...rowsOut]);
+  ws['!cols'] = [{ wch: 8 }, { wch: 22 }, { wch: 18 }, { wch: 24 }, { wch: 18 }, { wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 12 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '個体設置明細');
+  XLSX.writeFile(wb, `個体設置明細_${todayStr()}.xlsx`);
+  showMsg(`個体設置明細を出力しました（${rowsOut.length}行 / ${rows.length}設備）`);
 }
 
 async function selectLedgerEquipment(equipmentId) {
