@@ -942,7 +942,6 @@ function renderLedgerDetail(eq) {
       </div>
     </div>
   </div>`;
-  html += '<div id="ledger-individual-detail"></div>';
   html += '<div class="ledger-tree">';
   html += roots.length ? roots.map(r => renderComponentBlock(r, 0)).join('') : '<div class="empty">構成要素が登録されていません</div>';
   html += '</div>';
@@ -960,25 +959,33 @@ function renderLedgerDetail(eq) {
       openExchangeModal(eq, component, currentRec);
     };
   });
-  if (ledgerState.selectedIndividualId) {
-    renderLedgerIndividualDetail();
-  }
 }
 
+// 個体をクリックすると、画面のスクロール位置を変えずにモーダルで詳細（属性値・全設置履歴）を表示する
 async function selectLedgerIndividual(individualId) {
   ledgerState.selectedIndividualId = individualId;
   const eq = ledgerState.allEquipments.find(e => e.id === ledgerState.selectedEquipmentId);
   renderLedgerDetail(eq);
-  await renderLedgerIndividualDetail();
-  const box = document.getElementById('ledger-individual-detail');
-  if (box) box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  await openIndividualDetailModal(individualId);
 }
 
-async function renderLedgerIndividualDetail() {
-  const box = document.getElementById('ledger-individual-detail');
-  if (!box) return;
-  box.innerHTML = '読み込み中...';
-  const individualId = ledgerState.selectedIndividualId;
+async function openIndividualDetailModal(individualId) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-box" style="width:480px;">
+      <h2>個体詳細</h2>
+      <div id="ind-detail-modal-body">読み込み中...</div>
+      <div style="display:flex; justify-content:flex-end; margin-top:16px;">
+        <button class="btn ghost" id="ind-detail-modal-close-btn">閉じる</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.querySelector('#ind-detail-modal-close-btn').onclick = () => overlay.remove();
+
+  const box = overlay.querySelector('#ind-detail-modal-body');
   const [attrRes, histRes] = await Promise.all([
     sb.from('view_individual_attributes').select('*').eq('individual_id', individualId).order('display_order', { ascending: true }),
     sb.from('view_individual_installation_histories').select('*').eq('individual_id', individualId).order('installed_date', { ascending: false }),
@@ -993,8 +1000,9 @@ async function renderLedgerIndividualDetail() {
   const indRow = ledgerState.histories.find(r => r.individual_id === individualId && !r.removed_date)
     || ledgerState.histories.find(r => r.individual_id === individualId);
   const nameLabel = indRow ? escapeHtml(indRow.individual_name) : `ID: ${individualId}`;
-  let html = '<div style="border:1px solid #E4E6EA; border-radius:8px; padding:12px 14px; margin-bottom:16px; background:#FAFBFC;">';
-  html += `<p style="font-size:12px; color:#666; margin:0 0 8px; font-weight:600;">個体詳細（${nameLabel}）</p>`;
+  overlay.querySelector('.modal-box h2').textContent = `個体詳細（${nameLabel}）`;
+
+  let html = '<p style="font-size:12px; color:#666; margin:0 0 8px; font-weight:600;">属性値</p>';
   if (attrs.length) {
     html += '<div class="attr-grid">';
     attrs.forEach(a => {
@@ -1016,7 +1024,6 @@ async function renderLedgerIndividualDetail() {
   } else {
     html += '<div class="empty">履歴がありません</div>';
   }
-  html += '</div>';
   box.innerHTML = html;
 }
 
