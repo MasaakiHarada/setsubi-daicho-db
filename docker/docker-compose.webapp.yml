@@ -1,0 +1,27 @@
+# 設備台帳管理システム Webアプリ配信コンテナ・外部インターフェースAPIの追加環境変数
+# （本プロジェクトで追加。公式のdocker-compose.ymlに重ねて使う）
+#
+# 例（公式のcaddyオーバーレイと合わせて使う。COMPOSE_FILEに登録しておけば
+# `sh run.sh` 系のコマンドにも自動的に含まれる。README参照）:
+#   docker compose \
+#     -f docker-compose.yml \
+#     -f docker-compose.caddy.yml \
+#     -f <db-repoの絶対パス>/docker/docker-compose.webapp.yml \
+#     up -d
+#
+# WEBAPP_SOURCE_DIR・EXTERNAL_API_KEY は .env（.env.project.example参照）で設定しておくこと。
+services:
+  # 本システムのWebアプリ（webapp/index.html）を配信する軽量nginx。
+  # 公式スタックには含まれないため、本プロジェクトで追加する。
+  webapp:
+    image: nginx:alpine
+    container_name: setsubi-daicho-webapp
+    restart: unless-stopped
+    volumes:
+      - ${WEBAPP_SOURCE_DIR}:/usr/share/nginx/html:ro
+
+  # 外部インターフェースAPI（export-*関数）が使うAPIキーをfunctionsコンテナに追加する。
+  # 公式のfunctionsサービス定義（docker-compose.yml）に、environmentをマージする形で上乗せする。
+  functions:
+    environment:
+      EXTERNAL_API_KEY: ${EXTERNAL_API_KEY}

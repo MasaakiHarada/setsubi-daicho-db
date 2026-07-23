@@ -1,0 +1,15 @@
+# [非推奨・未使用] このファイルは使用しない。
+#
+# 当初、本プロジェクト独自のCaddyコンテナ定義としてこのファイルを用意したが、
+# 実機調査の結果、Supabase公式リポジトリに同梱の `docker-compose.caddy.yml`
+# （Kongの前段でCaddyがTLS終端し、Studio管理画面をBasic認証で保護する構成）が
+# 既に用意されていることが判明した。80/443番ポートの取り合いになるため、
+# 独自Caddyコンテナと公式Caddyオーバーレイを同時に使ってはならない。
+#
+# 現在の方針は「公式の docker-compose.caddy.yml を使い、その中で参照される
+# Caddyfile（セルフホストスタックの volumes/proxy/caddy/Caddyfile）を、
+# db-repo/docker/Caddyfile の内容で上書きする」というもの。
+# 詳細はdb-repo/docker/README.mdおよび移行計画書5.7節を参照。
+#
+# このファイルはGit管理の都合上削除していないが、docker composeの-fオプションには
+# 指定しないこと（指定するとcaddyコンテナが二重に起動し、ポート競合で失敗する）。
